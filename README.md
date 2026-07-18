@@ -98,6 +98,7 @@ Both harnesses return a failing exit status when any declared balance or browser
 
 - `index.html` — the game. The only file you need to play.
 - `DESIGN.md` — the full spec: every tower stat, wave formula, doctrine, and fusion recipe.
+- `BALANCE-LAB.md` — design brief for a future Rust-based auto-balancing lab (mass simulation + evolutionary search). Not built; a plan for another agent.
 - `sim.js`, `endless.js` — the headless balance harness. Node, no dependencies.
 - `analysis.js` — isolation-arena tool that measures every tower, branch, and fusion's effective DPS per cell and per gold, with a guard that fails if a fusion becomes a runaway or a trap. Node, no dependencies.
 - `qa.js`, `audit.js`, `screenshot.js` — browser tests, a UI text audit (scans every card, overlay, and preview for placeholder text), and screenshots. These need Playwright (`npm install`).
