@@ -1,0 +1,12 @@
+[
+  {"seed": 1, "map": 0, "maxWave": 3, "actions": []},
+  {"seed": 2, "map": 1, "maxWave": 3, "actions": [
+    {"wave": 0, "op": "place", "tower": 0, "x": 4, "y": 2},
+    {"wave": 1, "op": "upgrade", "x": 4, "y": 2}
+  ]},
+  {"seed": 3, "map": 2, "maxWave": 5, "actions": [
+    {"wave": 0, "op": "place", "tower": 0, "x": 5, "y": 3},
+    {"wave": 1, "op": "place", "tower": 0, "x": 6, "y": 3},
+    {"wave": 2, "op": "upgrade", "x": 5, "y": 3}
+  ]}
+]

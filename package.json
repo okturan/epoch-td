@@ -6,6 +6,7 @@
     "test": "npm run sim && npm run qa",
     "sim": "node sim.js",
     "analysis": "node analysis.js",
+    "oracle": "node oracle.js",
     "audit": "node audit.js",
     "endless": "node endless.js",
     "qa": "node qa.js",

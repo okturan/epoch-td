@@ -464,6 +464,7 @@ function draw(){
   }
   for(const e of S.enemies){
     const x=e.x*CELL,y=e.y*CELL,r=6+Math.min(9,Math.sqrt(e.max)/9),ti=ARCH.indexOf(e.row.boss?ARCH[0]:ARCH.find(a=>a.n===e.row.name))
+    if(!e.boss){ctx.fillStyle='#0b0b12cc';ctx.beginPath();ctx.arc(x,y,r+2.2,0,7);ctx.fill()}
     ctx.fillStyle=e.boss?A[3]:ECOL[Math.max(0,ti)];
     ctx.save();ctx.translate(x,y);
     const bb=1+.09*Math.sin(S.t*9+e.d*4);ctx.scale(bb,1/bb);
