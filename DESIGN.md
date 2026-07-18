@@ -76,14 +76,14 @@ After every boss wave clears (10/20/30/40, and every boss in Endless), the game 
 | Cold Snap | slow fields 50% (was 40%) |
 
 ## Secret fusions (hidden in-game — discovered through adjacency)
-Two adjacent towers matching a recipe (both at/above the minimum level) can fuse — via the gold card row or by dragging one onto the other. The survivor takes the hybrid identity (base type swaps where noted), keeps the higher level, combines invested gold, gains the +10% merge bonus, and its specialization is replaced by the fusion overlay. The in-game help only hints ("rumors…"); discovery is the reward.
+Two adjacent towers matching a recipe (both at/above the minimum level) can fuse — via the gold card row or by dragging one onto the other. The survivor takes the hybrid identity (base type swaps where noted), keeps the higher level, combines invested gold, gains the +10% merge bonus, and its specialization is replaced by the fusion overlay. The in-game help only hints ("rumors…"); discovery is the reward. Fusion multipliers are tuned by analysis.js, an isolation-arena harness that measures every tower, branch, and fusion effective DPS per cell and per gold, with a balance guard that fails if any fusion becomes a runaway (>1.85x its base best branch) or a trap (<0.95x its base).
 | recipe | min lvl | result | overlay |
 |---|---|---|---|
-| Catapult + Brazier | 2 | ✦ Meteor Thrower (catapult) | dmg ×1.5 · splash 1.4 · projectiles apply burn ×2 |
-| Ballista + Cannon | 2 | ✦ Siege Piercer (cannon) | dmg ×1.6 · pierces armor · knock 1.1 |
-| Missile + Reactor | 2 | ✦ Warhead Silo (missile) | dmg ×1.5 · every hit irradiates |
-| Gatling + Drone Hub | 2 | ✦ Swarm Core (gatling) | dmg ×1.2 · ramp cap 12 (→15/s) · hits slow |
-| Laser + Reactor | 3 | ✦ Sun Lance (laser) | dmg ×1.3 · ramp ×1.5 · beam irradiates |
+| Catapult + Brazier | 2 | ✦ Meteor Thrower (catapult) | dmg ×2 · splash 1.4 · projectiles apply burn ×2 |
+| Ballista + Cannon | 2 | ✦ Siege Piercer (cannon) | dmg ×2 · pierces armor · knock 1.1 |
+| Missile + Reactor | 2 | ✦ Warhead Silo (missile) | dmg ×1.2 · every hit irradiates (a debuff sidegrade: less raw damage than the Warheads branch, but marks the target for +20% from the whole board) |
+| Gatling + Drone Hub | 2 | ✦ Swarm Core (gatling) | dmg ×1.5 · ramp cap 12 (→15/s) · hits slow |
+| Laser + Reactor | 3 | ✦ Sun Lance (laser) | dmg ×1.15 · ramp ×1.5 · beam irradiates (late capstone, highest single-target DPS) |
 | identical L5 twins | 5 | ✦ Ascendant (same tower) | dmg ×1.6 · range ×1.15 |
 
 ## Merge economics

@@ -4,6 +4,7 @@
   "description": "Tower defense from the Stone Age to the Space Age in a single dependency-free HTML file.",
   "scripts": {
     "sim": "node sim.js",
+    "analysis": "node analysis.js",
     "endless": "node endless.js",
     "qa": "node qa.js",
     "shots": "node screenshot.js"

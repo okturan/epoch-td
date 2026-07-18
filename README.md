@@ -87,6 +87,7 @@ It needs nothing but Node. `endless.js` runs the same engine past wave 50 to fin
 - `index.html` — the game. The only file you need to play.
 - `DESIGN.md` — the full spec: every tower stat, wave formula, doctrine, and fusion recipe.
 - `sim.js`, `endless.js` — the headless balance harness. Node, no dependencies.
+- `analysis.js` — isolation-arena tool that measures every tower, branch, and fusion's effective DPS per cell and per gold, with a guard that fails if a fusion becomes a runaway or a trap. Node, no dependencies.
 - `qa.js`, `screenshot.js` — browser tests and screenshots. These need Playwright (`npm install`).
 
 ## Notes

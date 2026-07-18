@@ -52,6 +52,7 @@ const ok=(name,cond,extra)=>console.log(name.padEnd(20)+': '+(cond?'OK':'FAIL')+
   ok('secret offered',(await pg.locator('#pact').textContent()).includes('Meteor Thrower'));
   await pg.click('#pact .mchip');
   ok('secret fused',await pg.evaluate(()=>towerAt(S,4,4).sec===0&&!towerAt(S,5,4))&&(await pg.locator('#pinfo').textContent()).includes('Meteor Thrower'));
+  ok('fusion card has no undefined',!(await pg.locator('#panel').textContent()).includes('undefined')&&(await pg.locator('#panel').textContent()).includes('applies burn'));
   await pg.locator('#panel').screenshot({path:__dirname+'/shots/73-secret.png'});
   await pg.evaluate(()=>{sell(S,towerAt(S,4,4));selT=towerAt(S,4,2);syncPanel()});
   await pg.click('#panel button:has-text("Sell")');
