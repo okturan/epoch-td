@@ -94,11 +94,36 @@ npm test
 
 Both harnesses return a failing exit status when any declared balance or browser-interaction check fails. The pinned GitHub Actions workflow runs that same contract on every pull request and default-branch change.
 
+### Rust balance-lab prototype
+
+The repository also contains an early Rust twin of the simulation under
+`balance-lab/`. It is deliberately a lab, not the authority: the browser game
+and JavaScript oracle remain the source of truth.
+
+The current prototype can run deterministic cases, cross-check Rust traces
+against the JavaScript oracle, search parameterized player strategies in
+parallel with Rayon, benchmark the core, and render a static attack report.
+The checked golden suite is still small—3 cases and 11 wave traces—so this is
+proof of the cross-language contract, not a claim that the full optimizer
+roadmap is complete.
+
+```sh
+cargo test --manifest-path balance-lab/Cargo.toml --locked
+cargo run --manifest-path balance-lab/Cargo.toml --locked -- \
+  golden balance-lab/golden/cases.json
+```
+
+CI uses a pinned Rust 1.96.1 toolchain, checks formatting, compiles/tests the
+crate, and requires the golden command to pass. Generated Cargo output stays
+under ignored `balance-lab/target/`; the committed `balance-lab/out/` report is
+reviewable product evidence rather than a compiler cache.
+
 ## Files
 
 - `index.html` — the game. The only file you need to play.
 - `DESIGN.md` — the full spec: every tower stat, wave formula, doctrine, and fusion recipe.
-- `BALANCE-LAB.md` — design brief for a future Rust-based auto-balancing lab (mass simulation + evolutionary search). Not built; a plan for another agent.
+- `BALANCE-LAB.md` — the original auto-balancing design brief plus an explicit current-prototype status boundary.
+- `balance-lab/` — deterministic Rust core, JavaScript golden cross-check, Rayon attacker prototype, benchmark, and static report output.
 - `sim.js`, `endless.js` — the headless balance harness. Node, no dependencies.
 - `analysis.js` — isolation-arena tool that measures every tower, branch, and fusion's effective DPS per cell and per gold, with a guard that fails if a fusion becomes a runaway or a trap. Node, no dependencies.
 - `qa.js`, `audit.js`, `screenshot.js` — browser tests, a UI text audit (scans every card, overlay, and preview for placeholder text), and screenshots. These need Playwright (`npm install`).
