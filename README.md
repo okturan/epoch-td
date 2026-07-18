@@ -2,11 +2,13 @@
 
 Tower defense from the Stone Age to the Space Age, in a single HTML file. No dependencies, no build step, no image or audio files. Open it in a browser and play.
 
+**[▶ Play it now](https://okturan.github.io/epoch-td/)** — runs in the browser, nothing to install.
+
 ![EPOCH title screen with three map choices](media/start.png)
 
 ## Run it
 
-Download `index.html` and double-click it. That is the whole install. It runs offline and makes zero network requests. The file is about 62 KB.
+Play the [hosted version](https://okturan.github.io/epoch-td/), or download `index.html` and double-click it. Either way is the whole install. It runs offline and makes zero network requests. The file is about 62 KB.
 
 Pick one of three maps, then defend the path across 50 waves. You start with 80 gold and 20 lives. Enemies follow a fixed route, you place towers on the open cells, and every leak costs a life (a boss leak costs five). Survive all 50 to win. After that, Endless mode keeps the waves coming until something gets through.
 
