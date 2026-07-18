@@ -4,6 +4,8 @@ Tower defense from the Stone Age to the Space Age, in a single HTML file. No dep
 
 **[▶ Play it now](https://okturan.github.io/epoch-td/)** — runs in the browser, nothing to install.
 
+[![CI](https://github.com/okturan/epoch-td/actions/workflows/ci.yml/badge.svg)](https://github.com/okturan/epoch-td/actions/workflows/ci.yml)
+
 ![EPOCH title screen with three map choices](media/start.png)
 
 ## Run it
@@ -81,6 +83,16 @@ node sim.js
 ```
 
 It needs nothing but Node. `endless.js` runs the same engine past wave 50 to find where an optimized build gives out (around wave 77 for the scripted one). The browser side has a Playwright suite in `qa.js` that drives real clicks through every feature, and `screenshot.js` produced the images above.
+
+Run the complete deterministic and browser verification from a clean checkout:
+
+```sh
+npm ci
+npx playwright install chromium
+npm test
+```
+
+Both harnesses return a failing exit status when any declared balance or browser-interaction check fails. The pinned GitHub Actions workflow runs that same contract on every pull request and default-branch change.
 
 ## Files
 

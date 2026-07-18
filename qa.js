@@ -3,7 +3,8 @@ try{chromium=require('playwright').chromium}
 catch{chromium=require(process.env.PLAYWRIGHT_PATH||'/Users/okan/.npm/_npx/e41f203b7505f1fb/node_modules/playwright').chromium}
 const fs=require('fs');
 const INTENDED=eval(fs.readFileSync(__dirname+'/sim.js','utf8').match(/const INTENDED=(\[[\s\S]*?\]);/)[1]);
-const ok=(name,cond,extra)=>console.log(name.padEnd(20)+': '+(cond?'OK':'FAIL')+(extra?' '+extra:''));
+let failures=0;
+const ok=(name,cond,extra)=>{if(!cond)failures++;console.log(name.padEnd(20)+': '+(cond?'OK':'FAIL')+(extra?' '+extra:''))};
 (async()=>{
   fs.mkdirSync(__dirname+'/shots',{recursive:true});
   const br=await chromium.launch({channel:'chrome'}).catch(()=>chromium.launch());
@@ -149,5 +150,7 @@ const ok=(name,cond,extra)=>console.log(name.padEnd(20)+': '+(cond?'OK':'FAIL')+
   ok('fits small viewport',await pg.evaluate(()=>{scrollBy(0,200);return scrollY===0&&document.getElementById('app').getBoundingClientRect().bottom<=innerHeight+2}));
   ok('external requests',reqs.length===0,reqs.join(','));
   console.log(errors.length?'ERRORS:\n'+errors.join('\n'):'page errors         : none');
+  failures+=errors.length;
   await br.close();
+  if(failures)throw new Error(failures+' browser verification check(s) failed');
 })().catch(e=>{console.error(e);process.exit(1)});

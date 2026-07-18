@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Tower defense from the Stone Age to the Space Age in a single dependency-free HTML file.",
   "scripts": {
+    "test": "npm run sim && npm run qa",
     "sim": "node sim.js",
     "endless": "node endless.js",
     "qa": "node qa.js",

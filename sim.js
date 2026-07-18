@@ -132,3 +132,13 @@ function bot(mi){
 const botW=[0,1,2].map(bot);
 console.log('6 All maps bot-playable >=18 : '+(botW.every(w=>w>=18)?'PASS':'FAIL')+' (bot reached '+botW.join(' / ')+')');
 console.log('5 Laser required for Space   : '+(!NL.S.won?'PASS':'FAIL')+' (no-laser build '+(NL.S.won?'still wins':'dies wave '+nw)+')');
+
+const criteria=[
+  I.S.won&&I.S.lives>=5,
+  !B.S.won&&bw>=28&&bw<=34,
+  slow.length===0&&!I.stall,
+  !Gr.S.won&&[5,15,25,35,45].includes(gw),
+  !NL.S.won,
+  botW.every(w=>w>=18),
+];
+if(criteria.some(result=>!result))process.exitCode=1;
