@@ -1,0 +1,16 @@
+{
+  "name": "epoch-td",
+  "version": "1.0.0",
+  "description": "Tower defense from the Stone Age to the Space Age in a single dependency-free HTML file.",
+  "scripts": {
+    "sim": "node sim.js",
+    "endless": "node endless.js",
+    "qa": "node qa.js",
+    "shots": "node screenshot.js"
+  },
+  "keywords": ["tower-defense", "game", "canvas", "web-audio", "single-file", "no-dependencies"],
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
+}
