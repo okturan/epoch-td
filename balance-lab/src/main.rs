@@ -1702,23 +1702,29 @@ fn evaluate_prepared(
     perk: usize,
     activation_wave: usize,
 ) -> EffectObservation {
-    let off = run_counterfactual(
-        &prepared.input,
-        prepared.params.clone(),
-        Some(PerkIntervention {
-            perk,
-            enabled: false,
-            activation_wave,
-        }),
-    );
-    let on = run_counterfactual(
-        &prepared.input,
-        prepared.params.clone(),
-        Some(PerkIntervention {
-            perk,
-            enabled: true,
-            activation_wave,
-        }),
+    let (off, on) = rayon::join(
+        || {
+            run_counterfactual(
+                &prepared.input,
+                prepared.params.clone(),
+                Some(PerkIntervention {
+                    perk,
+                    enabled: false,
+                    activation_wave,
+                }),
+            )
+        },
+        || {
+            run_counterfactual(
+                &prepared.input,
+                prepared.params.clone(),
+                Some(PerkIntervention {
+                    perk,
+                    enabled: true,
+                    activation_wave,
+                }),
+            )
+        },
     );
     let metrics = [
         on.run.result.wave as f64 - off.run.result.wave as f64,
@@ -1852,9 +1858,12 @@ fn sensitivity(args: &[String]) {
                 let scenario_seed = seed.wrapping_add(index as u64 * 104_729);
                 let prepared = prepare_sensitivity(&gene, scenario_seed, max_wave);
                 accumulator.policy_runs += 1;
-                for perk in 0..12 {
-                    let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
-                    accumulator.record(perk, &observation);
+                let observations: Vec<_> = (0..12)
+                    .into_par_iter()
+                    .map(|perk| evaluate_prepared(&prepared, perk, gene.activation_wave))
+                    .collect();
+                for (perk, observation) in observations.iter().enumerate() {
+                    accumulator.record(perk, observation);
                 }
                 accumulator
             })
