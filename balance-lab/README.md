@@ -38,7 +38,18 @@ cargo run --release --manifest-path balance-lab/Cargo.toml -- calibrate traces.j
 
 # Seed 25% of the initial attacker population from those priors
 cargo run --release --manifest-path balance-lab/Cargo.toml -- attack 20 256 1 balance-lab/out/calibration.json
+cargo run --release --manifest-path balance-lab/Cargo.toml -- defend 6 24 48 7 balance-lab/out/calibration.json
 ```
+
+For a repeatable browser-runtime smoke corpus (not a substitute for human
+telemetry), run `npm run lab:capture-traces`, then calibrate
+`balance-lab/out/playtraces.json`. The three sessions execute legal strategies
+inside Chromium and exercise action recording, reactions, powers, doctrines,
+and early calls.
+
+After generating a dashboard, `npm run lab:inspect-dashboard` checks the rendered
+archive, opens its top replay in Chromium, advances the simulation, and writes
+ignored dashboard/replay screenshots beside the report.
 
 `oracle.js` accepts one case or an array of cases on stdin. A case contains a
 map, seed, wave limit, optional parameter overrides, and an action list. It runs

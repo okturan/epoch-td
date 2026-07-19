@@ -68,7 +68,7 @@ fn main() {
 }
 fn help() {
     eprintln!(
-        "epoch-lab <run [case.json]|batch [jobs.json]|calibrate [traces.json]|golden [cases.json]|policy-golden [cases seed]|attack [generations population seed calibration.json]|defend [generations candidates policies seed]|dashboard [report.json]|bench>"
+        "epoch-lab <run [case.json]|batch [jobs.json]|calibrate [traces.json]|golden [cases.json]|policy-golden [cases seed]|attack [generations population seed calibration.json]|defend [generations candidates policies seed calibration.json]|dashboard [report.json]|bench>"
     )
 }
 
@@ -139,6 +139,11 @@ fn batch(path: Option<&String>) {
 struct HumanTrace {
     actions: Vec<Action>,
     duration_seconds: Option<f64>,
+    result: Option<HumanResult>,
+}
+#[derive(Deserialize)]
+struct HumanResult {
+    wave: usize,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,8 +172,21 @@ fn calibrate(path: Option<&String>) {
     let mut early = 0usize;
     let mut support_adjacent = 0usize;
     let mut placements = 0usize;
+    let mut wave_opportunities = 0usize;
     let mut seconds = 0.;
     for (session, trace) in traces.iter().enumerate() {
+        wave_opportunities += trace
+            .result
+            .as_ref()
+            .map(|result| result.wave)
+            .unwrap_or_else(|| {
+                trace
+                    .actions
+                    .iter()
+                    .map(|action| action.wave)
+                    .max()
+                    .unwrap_or(0)
+            });
         seconds += trace.duration_seconds.unwrap_or_else(|| {
             trace
                 .actions
@@ -237,8 +255,8 @@ fn calibrate(path: Option<&String>) {
         tower_weights: std::array::from_fn(|i| tw[i]),
         doctrine_weights: std::array::from_fn(|i| dw[i]),
         power_weights: std::array::from_fn(|i| pw[i]),
-        early_call_weight: if early > 0 {
-            early as f64 / traces.len() as f64
+        early_call_weight: if wave_opportunities > 0 {
+            (early as f64 / wave_opportunities as f64 * 2. - 1.).clamp(-1., 1.)
         } else {
             -1.
         },
@@ -1142,14 +1160,20 @@ fn defend(args: &[String]) {
     let candidates: usize = args.get(3).and_then(|x| x.parse().ok()).unwrap_or(24);
     let policy_count: usize = args.get(4).and_then(|x| x.parse().ok()).unwrap_or(48);
     let seed = args.get(5).and_then(|x| x.parse().ok()).unwrap_or(7);
+    let calibration: Option<CalibrationPrior> = args
+        .get(6)
+        .map(|path| serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap());
     let mut rng = Xoshiro::new(seed);
     let mut policies: Vec<_> = (0..policy_count)
         .map(|i| (Genome::random(&mut rng), seed + i as u64 * 104729))
         .collect();
+    if let Some(prior) = &calibration {
+        let seeded = (policy_count / 4).max(1).min(policy_count);
+        for (genome, _) in policies.iter_mut().take(seeded) {
+            seed_from_prior(genome, prior);
+        }
+    }
     let mut best = Params::default();
-    let (mut best_loss, mut best_metrics) = parameter_loss(&best, &policies, 60);
-    let baseline_loss = best_loss;
-    let baseline_metrics = best_metrics.clone();
     let started = Instant::now();
     let mut history = vec![];
     let mut shortlist: Vec<(f64, Params, Value)> = vec![];
@@ -1163,6 +1187,7 @@ fn defend(args: &[String]) {
             &mut rng,
             seed + generation as u64 * 1_000_003,
         );
+        let (incumbent_loss, incumbent_metrics) = parameter_loss(&best, &policies, 60);
         let mut pool: Vec<_> = (0..candidates.saturating_sub(1))
             .map(|_| parameter_cma.sample(&mut rng))
             .collect();
@@ -1208,21 +1233,31 @@ fn defend(args: &[String]) {
         shortlist.extend(finalists.iter().take(3).cloned());
         shortlist.sort_by(|a, b| a.0.total_cmp(&b.0));
         shortlist.truncate(6);
-        if finalists[0].0 < best_loss {
-            best_loss = finalists[0].0;
+        let (generation_loss, generation_metrics) = if finalists[0].0 < incumbent_loss {
             best = finalists[0].1.clone();
-            best_metrics = finalists[0].2.clone();
-        }
-        history.push(json!({"generation":generation,"loss":best_loss,"metrics":best_metrics,"parameterSigma":parameter_cma.sigma,"attackerPool":policies.len(),"tier1Candidates":candidates,"tier2Finalists":finalists.len()}));
-        eprintln!("defender generation {generation}: loss {best_loss:.2}");
+            (finalists[0].0, finalists[0].2.clone())
+        } else {
+            (incumbent_loss, incumbent_metrics)
+        };
+        history.push(json!({"generation":generation,"loss":generation_loss,"metrics":generation_metrics,"parameterSigma":parameter_cma.sigma,"attackerPool":policies.len(),"tier1Candidates":candidates,"tier2Finalists":finalists.len()}));
+        eprintln!("defender generation {generation}: loss {generation_loss:.2}");
     }
     fs::create_dir_all("balance-lab/out").unwrap();
-    let searched_loss = best_loss;
+    let searched_params = best.clone();
+    let (searched_loss, searched_metrics) = parameter_loss(&searched_params, &policies, 60);
     let candidate_path = format!(
         "{}/balance-lab/out/.candidate-params.json",
         env!("CARGO_MANIFEST_DIR").trim_end_matches("/balance-lab")
     );
-    shortlist.push((baseline_loss, Params::default(), baseline_metrics.clone()));
+    shortlist.push((searched_loss, searched_params, searched_metrics));
+    let baseline = Params::default();
+    let (baseline_loss, baseline_metrics) = parameter_loss(&baseline, &policies, 60);
+    shortlist.push((baseline_loss, baseline, baseline_metrics.clone()));
+    for entry in &mut shortlist {
+        let (loss, metrics) = parameter_loss(&entry.1, &policies, 60);
+        entry.0 = loss;
+        entry.2 = metrics;
+    }
     shortlist.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut selected = None;
     let mut rejected_candidates = 0usize;
@@ -1242,18 +1277,16 @@ fn defend(args: &[String]) {
     fs::remove_file(&candidate_path).unwrap();
     let (selected_loss, selected_params, selected_metrics, gates) =
         selected.expect("the shipped baseline must pass source-of-truth gates");
-    let accepted = (selected_loss - searched_loss).abs() < 1e-9;
+    let accepted = serde_json::to_value(js_params_patch(&selected_params)).unwrap()
+        != serde_json::to_value(js_params_patch(&Params::default())).unwrap();
     if rejected_candidates > 0 {
         eprintln!(
             "defender rejected {rejected_candidates} lower-loss candidate(s) at source gates"
         );
     }
-    best = selected_params;
-    best_loss = selected_loss;
-    best_metrics = selected_metrics;
-    let patch = js_params_patch(&best);
+    let patch = js_params_patch(&selected_params);
     let elapsed = started.elapsed().as_secs_f64();
-    let report = json!({"schema":1,"kind":"defender","optimizer":"diagonal-cma-es","minimaxRounds":generations,"tier1MaxWave":25,"tier2MaxWave":60,"seed":seed,"generations":generations,"candidates":candidates,"policies":policy_count,"elapsedSeconds":elapsed,"threads":rayon::current_num_threads(),"coreHours":elapsed*rayon::current_num_threads() as f64/3600.,"loss":best_loss,"metrics":best_metrics,"history":history,"beforeAfter":{"before":{"loss":baseline_loss,"metrics":baseline_metrics},"after":{"loss":best_loss,"metrics":best_metrics}},"searchedCandidate":{"loss":searched_loss,"accepted":accepted,"rejectedCandidates":rejected_candidates},"gates":gates,"jsPatch":patch,"candidate":best});
+    let report = json!({"schema":1,"kind":"defender","optimizer":"diagonal-cma-es","minimaxRounds":generations,"tier1MaxWave":25,"tier2MaxWave":60,"seed":seed,"generations":generations,"candidates":candidates,"policies":policy_count,"calibration":calibration.as_ref().map(|p|json!({"sessions":p.sessions,"actions":p.actions})),"elapsedSeconds":elapsed,"threads":rayon::current_num_threads(),"coreHours":elapsed*rayon::current_num_threads() as f64/3600.,"loss":selected_loss,"metrics":selected_metrics,"history":history,"beforeAfter":{"before":{"loss":baseline_loss,"metrics":baseline_metrics},"after":{"loss":selected_loss,"metrics":selected_metrics}},"searchedCandidate":{"loss":searched_loss,"accepted":accepted,"rejectedCandidates":rejected_candidates},"gates":gates,"jsPatch":patch,"candidate":selected_params});
     fs::write(
         "balance-lab/out/defender-report.json",
         serde_json::to_vec_pretty(&report).unwrap(),
@@ -1266,7 +1299,7 @@ fn defend(args: &[String]) {
     .unwrap();
     fs::write(
         "balance-lab/out/candidate.json",
-        serde_json::to_vec_pretty(&best).unwrap(),
+        serde_json::to_vec_pretty(&selected_params).unwrap(),
     )
     .unwrap();
     println!("balance-lab/out/defender-report.json\nbalance-lab/out/params.json");
