@@ -1342,6 +1342,8 @@ const ACTIVATION_LEVELS: [usize; 5] = [10, 14, 15, 20, 24];
 struct SensitivityGene {
     genome: Genome,
     trial_seed: u64,
+    sell_strategy: bool,
+    sell_slot: usize,
     map: usize,
     speed_level: usize,
     range_level: usize,
@@ -1597,6 +1599,8 @@ fn broad_gene(seed: u64, index: usize) -> SensitivityGene {
     SensitivityGene {
         genome,
         trial_seed: seed.wrapping_add(index as u64 * 104_729),
+        sell_strategy: index.is_multiple_of(4),
+        sell_slot: index / 4 % 8,
         map: index % 3,
         speed_level: index / 3 % SPEED_LEVELS.len(),
         range_level: index / 15 % RANGE_LEVELS.len(),
@@ -1638,7 +1642,37 @@ fn rush_proximity(activation_wave: usize) -> &'static str {
 
 fn prepare_sensitivity(gene: &SensitivityGene, seed: u64, max_wave: usize) -> PreparedSensitivity {
     let params = sensitivity_params(gene);
-    let policy = run_policy(&gene.genome, seed, gene.map, max_wave, params.clone());
+    let mut policy = run_policy(&gene.genome, seed, gene.map, max_wave, params.clone());
+    if gene.sell_strategy {
+        let sell_target = policy
+            .actions
+            .iter()
+            .filter(|action| action.op == "place" && action.wave <= gene.activation_wave)
+            .nth(gene.sell_slot)
+            .or_else(|| {
+                let candidates = policy
+                    .actions
+                    .iter()
+                    .filter(|action| action.op == "place" && action.wave <= gene.activation_wave)
+                    .collect::<Vec<_>>();
+                candidates
+                    .get(gene.sell_slot % candidates.len().max(1))
+                    .copied()
+            })
+            .cloned();
+        if let Some(target) = sell_target {
+            policy.actions.push(Action {
+                wave: gene.activation_wave,
+                tick: None,
+                op: "sell".into(),
+                tower: 0,
+                x: target.x,
+                y: target.y,
+                branch: 0,
+                with: None,
+            });
+        }
+    }
     let has_homing = policy
         .tower_counts
         .iter()
@@ -1651,10 +1685,16 @@ fn prepare_sensitivity(gene: &SensitivityGene, seed: u64, max_wave: usize) -> Pr
         .any(|(tower, &count)| {
             count > 0
                 && (params.towers[tower].splash > 0.
-                    || params.towers[tower].branch1.sp.is_some()
-                    || params.towers[tower].branch2.sp.is_some())
+                    || (policy.branch_counts[tower][0] > 0
+                        && params.towers[tower].branch1.sp.is_some())
+                    || (policy.branch_counts[tower][1] > 0
+                        && params.towers[tower].branch2.sp.is_some()))
         })
-        || policy.fusion_counts.iter().any(|&count| count > 0);
+        || policy
+            .fusion_counts
+            .iter()
+            .enumerate()
+            .any(|(fusion, &count)| count > 0 && params.fusions[fusion].modifiers.sp.is_some());
     let tower_kinds = policy
         .tower_counts
         .iter()
@@ -1676,6 +1716,8 @@ fn prepare_sensitivity(gene: &SensitivityGene, seed: u64, max_wave: usize) -> Pr
         format!("rushProximity:{}", rush_proximity(gene.activation_wave)),
         format!("focusTower:{}", gene.focus_tower),
         format!("composition:{composition}"),
+        format!("sellStrategy:{}", gene.sell_strategy),
+        format!("screenWave:{max_wave}"),
         format!("reaction:{}", reaction_bucket(gene.genome.reaction_ticks)),
     ];
     PreparedSensitivity {
@@ -1802,6 +1844,12 @@ fn mutate_gene(parent: &SensitivityGene, rng: &mut Xoshiro) -> SensitivityGene {
     if rng.next_f64() < 0.15 {
         child.trial_seed = rng.next_u64()
     }
+    if rng.next_f64() < 0.2 {
+        child.sell_strategy = !child.sell_strategy
+    }
+    if rng.next_f64() < 0.2 {
+        child.sell_slot = rng.next_u64() as usize % 8
+    }
     child
 }
 
@@ -1826,6 +1874,14 @@ fn classify_perk(broad: &EffectStats, targeted: &EffectStats, full: &EffectStats
         "harmful"
     } else {
         "meaningful"
+    }
+}
+
+fn sensitivity_screen_wave(perk: usize, default_wave: usize) -> usize {
+    if [8, 10, 11].contains(&perk) {
+        default_wave.max(50)
+    } else {
+        default_wave
     }
 }
 
@@ -1857,10 +1913,19 @@ fn sensitivity(args: &[String]) {
                 let gene = broad_gene(seed, index);
                 let scenario_seed = seed.wrapping_add(index as u64 * 104_729);
                 let prepared = prepare_sensitivity(&gene, scenario_seed, max_wave);
-                accumulator.policy_runs += 1;
+                let late_prepared =
+                    (max_wave < 50).then(|| prepare_sensitivity(&gene, scenario_seed, 50));
+                accumulator.policy_runs += 1 + u64::from(late_prepared.is_some());
                 let observations: Vec<_> = (0..12)
                     .into_par_iter()
-                    .map(|perk| evaluate_prepared(&prepared, perk, gene.activation_wave))
+                    .map(|perk| {
+                        let scenario = if sensitivity_screen_wave(perk, max_wave) > max_wave {
+                            late_prepared.as_ref().unwrap()
+                        } else {
+                            &prepared
+                        };
+                        evaluate_prepared(scenario, perk, gene.activation_wave)
+                    })
                     .collect();
                 for (perk, observation) in observations.iter().enumerate() {
                     accumulator.record(perk, observation);
@@ -1895,7 +1960,11 @@ fn sensitivity(args: &[String]) {
                 .with_max_len(1)
                 .map(|gene| {
                     let scenario_seed = gene.trial_seed;
-                    let prepared = prepare_sensitivity(&gene, scenario_seed, max_wave);
+                    let prepared = prepare_sensitivity(
+                        &gene,
+                        scenario_seed,
+                        sensitivity_screen_wave(perk, max_wave),
+                    );
                     let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
                     let fitness = observation.outcome_score * 1_000. + observation.mechanical_score;
                     (fitness, gene, observation)
@@ -1998,6 +2067,8 @@ fn sensitivity(args: &[String]) {
             "gaGenerations":ga_generations,
             "gaPopulation":ga_population,
             "screenMaxWave":max_wave,
+            "lateScreenWave":50,
+            "lateScreenPerks":[PERK_NAMES[8],PERK_NAMES[10],PERK_NAMES[11]],
             "fullWaveFinalistsPerPerk":ga_population.min(64),
             "corpusDimensions":{
                 "maps":[0,1,2],
@@ -2008,7 +2079,7 @@ fn sensitivity(args: &[String]) {
                 "activationWaves":ACTIVATION_LEVELS,
                 "focusTowers":10,
                 "policyGenomeDimensions":46,
-                "policyVariation":["placements","tower priorities","branches","merges","fusions","doctrines","powerups","early calls","reaction delay","APM"]
+                "policyVariation":["placements","tower priorities","branches","merges","fusions","doctrines","powerups","early calls","reaction delay","APM","sell timing and target"]
             }
         },
         "counts":{"pairedComparisons":total_pairs,"counterfactualRuns":counterfactual_runs,"policyGenerationRuns":policy_runs,"totalSimulationRuns":total_simulation_runs,"broadPairs":broad_pairs,"targetedPairs":targeted_pairs,"fullWavePairs":full_pairs},

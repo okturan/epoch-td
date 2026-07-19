@@ -70,7 +70,10 @@ seed and action list in the report.
 
 The sensitivity command builds a stratified corpus across maps, placement and
 tower policies, enemy speed/health/count, tower range, reaction timing, and
-doctrine activation immediately before and on rush waves. Each observation is
+doctrine activation immediately before and on rush waves. It injects explicit
+sell strategies for refund testing and extends projectile-speed, irradiation,
+and slow-field screens through wave 50 so homing and late towers are present.
+Each observation is
 an exact common-random-number pair: identical seed, parameters, map, and action
 queue, with one doctrine forced off versus on. It reports paired deltas and 95%
 confidence intervals for survival wave, lives, gold, leaks, leak damage, clear
@@ -80,7 +83,7 @@ After the broad pass, a genetic search targets the largest outcome or mechanical
 effect for each doctrine separately, then replays finalists through wave 50.
 Projectile-speed results are additionally stratified by homing, splash, enemy
 speed, range, map geometry, tower composition, reaction timing, and rush
-proximity. The default executes 2,036,352 paired comparisons and 5,009,056 total
+proximity. The default executes 2,036,352 paired comparisons and 5,109,056 total
 simulation runs. Its output is `out/sensitivity-report.json`. Classifications
 mean "observed under this finite corpus and adversarial search"; they are not a
 proof over every possible state and do not automatically modify or delete a

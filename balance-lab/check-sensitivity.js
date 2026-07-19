@@ -66,6 +66,23 @@ const interactionKeys = Object.keys(report.projectileSpeedInteractions || {});
 for (const prefix of ["homing:", "splash:", "enemySpeed:", "range:", "map:", "rushProximity:"]) {
   check(interactionKeys.some((key) => key.startsWith(prefix)), `missing projectile-speed interaction ${prefix}`);
 }
+if (minimumPairs >= 2_000_000) {
+  for (const key of ["homing:false", "homing:true", "splash:false", "splash:true"]) {
+    check(report.projectileSpeedInteractions[key]?.pairs > 0, `missing populated projectile-speed stratum ${key}`);
+  }
+  check(
+    report.perks[4].broad.outcomeChangeRate > 0 &&
+      report.perks[4].broad.metrics.gold.max > 0,
+    "War Economy corpus contains no effective sell intervention",
+  );
+  for (const perk of [10, 11]) {
+    check(
+      report.perks[perk].targeted.maxOutcomeScore > 0 ||
+        report.perks[perk].targeted.maxMechanicalScore > 0,
+      `${report.perks[perk].name} targeted search found no active late-game context`,
+    );
+  }
+}
 finiteNumbers(report);
 console.log(
   `sensitivity report valid: ${report.counts.pairedComparisons} paired comparisons, ${report.counts.totalSimulationRuns} total simulations`,
