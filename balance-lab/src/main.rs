@@ -1846,6 +1846,7 @@ fn sensitivity(args: &[String]) {
         let end = (start + chunk).min(broad_scenarios);
         let partial = (start..end)
             .into_par_iter()
+            .with_max_len(1)
             .fold(SensitivityAccumulator::new, |mut accumulator, index| {
                 let gene = broad_gene(seed, index);
                 let scenario_seed = seed.wrapping_add(index as u64 * 104_729);
@@ -1882,6 +1883,7 @@ fn sensitivity(args: &[String]) {
         for generation in 0..ga_generations {
             let mut ranked: Vec<_> = population
                 .into_par_iter()
+                .with_max_len(1)
                 .map(|gene| {
                     let scenario_seed = gene.trial_seed;
                     let prepared = prepare_sensitivity(&gene, scenario_seed, max_wave);
