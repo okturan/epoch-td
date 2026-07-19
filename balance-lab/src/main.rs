@@ -1353,10 +1353,76 @@ struct SensitivityGene {
     focus_tower: usize,
 }
 
+#[derive(Clone, Copy)]
+struct SensitivityContext {
+    homing: bool,
+    splash: bool,
+    composition: &'static str,
+    enemy_speed_factor: f64,
+    range_factor: f64,
+    hp_factor: f64,
+    count_factor: f64,
+    map: usize,
+    activation_wave: usize,
+    rush_proximity: &'static str,
+    focus_tower: usize,
+    sell_strategy: bool,
+    sell_slot: usize,
+    sell_scheduled: bool,
+    screen_wave: usize,
+    reaction_bucket: &'static str,
+    reaction_ticks: u32,
+    apm: f64,
+}
+
+impl SensitivityContext {
+    fn json(self) -> Value {
+        json!({
+            "homing":self.homing,
+            "splash":self.splash,
+            "composition":self.composition,
+            "enemySpeedFactor":self.enemy_speed_factor,
+            "rangeFactor":self.range_factor,
+            "hpFactor":self.hp_factor,
+            "countFactor":self.count_factor,
+            "map":self.map,
+            "activationWave":self.activation_wave,
+            "rushProximity":self.rush_proximity,
+            "focusTower":self.focus_tower,
+            "sellStrategy":self.sell_strategy,
+            "sellSlot":self.sell_slot,
+            "sellScheduled":self.sell_scheduled,
+            "screenWave":self.screen_wave,
+            "reactionBucket":self.reaction_bucket,
+            "reactionTicks":self.reaction_ticks,
+            "apm":self.apm,
+        })
+    }
+
+    fn interaction_labels(self) -> Vec<String> {
+        vec![
+            format!("homing:{}", self.homing),
+            format!("splash:{}", self.splash),
+            format!("enemySpeed:{:.2}", self.enemy_speed_factor),
+            format!("range:{:.2}", self.range_factor),
+            format!("map:{}", self.map),
+            format!("activationWave:{}", self.activation_wave),
+            format!("rushProximity:{}", self.rush_proximity),
+            format!("focusTower:{}", self.focus_tower),
+            format!("composition:{}", self.composition),
+            format!("sellStrategy:{}", self.sell_strategy),
+            format!("screenWave:{}", self.screen_wave),
+            format!("reaction:{}", self.reaction_bucket),
+        ]
+    }
+}
+
 struct PreparedSensitivity {
     input: Input,
-    params: Params,
-    contexts: Vec<String>,
+    checkpoint: CounterfactualCheckpoint,
+    baseline_reusable: bool,
+    context: SensitivityContext,
+    interaction_labels: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -1365,7 +1431,6 @@ struct EffectObservation {
     utility: f64,
     outcome_score: f64,
     mechanical_score: f64,
-    contexts: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -1430,7 +1495,8 @@ struct EffectStats {
     metrics: Vec<Moment>,
     max_outcome_score: f64,
     max_mechanical_score: f64,
-    max_context: String,
+    max_outcome_context: Option<SensitivityContext>,
+    max_mechanical_context: Option<SensitivityContext>,
 }
 impl EffectStats {
     fn new() -> Self {
@@ -1445,10 +1511,11 @@ impl EffectStats {
             metrics: (0..EFFECT_METRICS.len()).map(|_| Moment::new()).collect(),
             max_outcome_score: 0.,
             max_mechanical_score: 0.,
-            max_context: String::new(),
+            max_outcome_context: None,
+            max_mechanical_context: None,
         }
     }
-    fn push(&mut self, observation: &EffectObservation) {
+    fn push(&mut self, observation: &EffectObservation, context: SensitivityContext) {
         const EPS: f64 = 1e-9;
         self.pairs += 1;
         self.utility.push(observation.utility);
@@ -1476,10 +1543,11 @@ impl EffectStats {
         if observation.utility < -0.1 {
             self.negative += 1
         }
-        if observation.outcome_score > self.max_outcome_score
-            || observation.mechanical_score > self.max_mechanical_score
-        {
-            self.max_context = observation.contexts.join("|");
+        if observation.outcome_score > self.max_outcome_score {
+            self.max_outcome_context = Some(context);
+        }
+        if observation.mechanical_score > self.max_mechanical_score {
+            self.max_mechanical_context = Some(context);
         }
         self.max_outcome_score = self.max_outcome_score.max(observation.outcome_score);
         self.max_mechanical_score = self.max_mechanical_score.max(observation.mechanical_score);
@@ -1495,10 +1563,11 @@ impl EffectStats {
         for (left, right) in self.metrics.iter_mut().zip(&other.metrics) {
             left.merge(right)
         }
-        if other.max_outcome_score > self.max_outcome_score
-            || other.max_mechanical_score > self.max_mechanical_score
-        {
-            self.max_context.clone_from(&other.max_context)
+        if other.max_outcome_score > self.max_outcome_score {
+            self.max_outcome_context = other.max_outcome_context;
+        }
+        if other.max_mechanical_score > self.max_mechanical_score {
+            self.max_mechanical_context = other.max_mechanical_context;
         }
         self.max_outcome_score = self.max_outcome_score.max(other.max_outcome_score);
         self.max_mechanical_score = self.max_mechanical_score.max(other.max_mechanical_score);
@@ -1524,7 +1593,8 @@ impl EffectStats {
             "metrics":metrics,
             "maxOutcomeScore":self.max_outcome_score,
             "maxMechanicalScore":self.max_mechanical_score,
-            "maxContext":self.max_context,
+            "maxOutcomeContext":self.max_outcome_context.map(SensitivityContext::json),
+            "maxMechanicalContext":self.max_mechanical_context.map(SensitivityContext::json),
         })
     }
 }
@@ -1555,20 +1625,26 @@ impl SensitivityAccumulator {
             policy_runs: 0,
         }
     }
-    fn record(&mut self, perk: usize, observation: &EffectObservation) {
-        self.perks[perk].push(observation);
+    fn record(
+        &mut self,
+        perk: usize,
+        observation: &EffectObservation,
+        context: SensitivityContext,
+        interaction_labels: &[String],
+    ) {
+        self.perks[perk].push(observation, context);
         if perk == 8 {
-            for context in &observation.contexts {
+            for label in interaction_labels {
                 self.projectile_interactions
-                    .entry(context.clone())
+                    .entry(label.clone())
                     .or_insert_with(EffectStats::new)
-                    .push(observation);
+                    .push(observation, context);
             }
-            let joint = format!("joint:{}", observation.contexts.join("|"));
+            let joint = format!("joint:{}", interaction_labels.join("|"));
             self.projectile_interactions
                 .entry(joint)
                 .or_insert_with(EffectStats::new)
-                .push(observation);
+                .push(observation, context);
         }
     }
     fn merge(&mut self, other: &Self) {
@@ -1640,9 +1716,22 @@ fn rush_proximity(activation_wave: usize) -> &'static str {
     }
 }
 
-fn prepare_sensitivity(gene: &SensitivityGene, seed: u64, max_wave: usize) -> PreparedSensitivity {
+fn prepare_sensitivity(
+    gene: &SensitivityGene,
+    seed: u64,
+    max_wave: usize,
+    collect_contexts: bool,
+) -> PreparedSensitivity {
     let params = sensitivity_params(gene);
-    let mut policy = run_policy(&gene.genome, seed, gene.map, max_wave, params.clone());
+    let (mut policy, checkpoint) = run_policy_with_checkpoint(
+        &gene.genome,
+        seed,
+        gene.map,
+        max_wave,
+        params.clone(),
+        gene.activation_wave,
+    );
+    let mut baseline_reusable = true;
     if gene.sell_strategy {
         let sell_target = policy
             .actions
@@ -1671,6 +1760,7 @@ fn prepare_sensitivity(gene: &SensitivityGene, seed: u64, max_wave: usize) -> Pr
                 branch: 0,
                 with: None,
             });
+            baseline_reusable = false;
         }
     }
     let has_homing = policy
@@ -1706,20 +1796,31 @@ fn prepare_sensitivity(gene: &SensitivityGene, seed: u64, max_wave: usize) -> Pr
         2..=3 => "focused-mix",
         _ => "broad-mix",
     };
-    let contexts = vec![
-        format!("homing:{has_homing}"),
-        format!("splash:{has_splash}"),
-        format!("enemySpeed:{:.2}", SPEED_LEVELS[gene.speed_level]),
-        format!("range:{:.2}", RANGE_LEVELS[gene.range_level]),
-        format!("map:{}", gene.map),
-        format!("activationWave:{}", gene.activation_wave),
-        format!("rushProximity:{}", rush_proximity(gene.activation_wave)),
-        format!("focusTower:{}", gene.focus_tower),
-        format!("composition:{composition}"),
-        format!("sellStrategy:{}", gene.sell_strategy),
-        format!("screenWave:{max_wave}"),
-        format!("reaction:{}", reaction_bucket(gene.genome.reaction_ticks)),
-    ];
+    let context = SensitivityContext {
+        homing: has_homing,
+        splash: has_splash,
+        composition,
+        enemy_speed_factor: SPEED_LEVELS[gene.speed_level],
+        range_factor: RANGE_LEVELS[gene.range_level],
+        hp_factor: HP_LEVELS[gene.hp_level],
+        count_factor: COUNT_LEVELS[gene.count_level],
+        map: gene.map,
+        activation_wave: gene.activation_wave,
+        rush_proximity: rush_proximity(gene.activation_wave),
+        focus_tower: gene.focus_tower,
+        sell_strategy: gene.sell_strategy,
+        sell_slot: gene.sell_slot,
+        sell_scheduled: !baseline_reusable,
+        screen_wave: max_wave,
+        reaction_bucket: reaction_bucket(gene.genome.reaction_ticks),
+        reaction_ticks: gene.genome.reaction_ticks,
+        apm: gene.genome.apm,
+    };
+    let interaction_labels = if collect_contexts {
+        context.interaction_labels()
+    } else {
+        vec![]
+    };
     PreparedSensitivity {
         input: Input {
             seed,
@@ -1730,8 +1831,10 @@ fn prepare_sensitivity(gene: &SensitivityGene, seed: u64, max_wave: usize) -> Pr
             initial: None,
             endless: max_wave > 50,
         },
-        params,
-        contexts,
+        checkpoint,
+        baseline_reusable,
+        context,
+        interaction_labels,
     }
 }
 
@@ -1744,37 +1847,41 @@ fn evaluate_prepared(
     perk: usize,
     activation_wave: usize,
 ) -> EffectObservation {
-    let (off, on) = rayon::join(
-        || {
-            run_counterfactual(
-                &prepared.input,
-                prepared.params.clone(),
-                Some(PerkIntervention {
-                    perk,
-                    enabled: false,
-                    activation_wave,
-                }),
-            )
-        },
-        || {
-            run_counterfactual(
-                &prepared.input,
-                prepared.params.clone(),
-                Some(PerkIntervention {
-                    perk,
-                    enabled: true,
-                    activation_wave,
-                }),
-            )
-        },
+    let (off, on) = run_counterfactual_summary_pair_from_checkpoint(
+        &prepared.input,
+        &prepared.checkpoint,
+        perk,
+        activation_wave,
+        prepared.baseline_reusable,
     );
+    effect_observation(off, on)
+}
+
+fn evaluate_prepared_batch(
+    prepared: &PreparedSensitivity,
+    perks: &[usize],
+    activation_wave: usize,
+) -> Vec<(usize, EffectObservation)> {
+    run_counterfactual_summary_batch_from_checkpoint(
+        &prepared.input,
+        &prepared.checkpoint,
+        perks,
+        activation_wave,
+        prepared.baseline_reusable,
+    )
+    .into_iter()
+    .map(|(perk, off, on)| (perk, effect_observation(off, on)))
+    .collect()
+}
+
+fn effect_observation(off: CounterfactualSummary, on: CounterfactualSummary) -> EffectObservation {
     let metrics = [
-        on.run.result.wave as f64 - off.run.result.wave as f64,
-        on.run.result.lives as f64 - off.run.result.lives as f64,
-        on.run.result.gold - off.run.result.gold,
+        on.wave as f64 - off.wave as f64,
+        on.lives as f64 - off.lives as f64,
+        on.gold - off.gold,
         on.telemetry.leaks as f64 - off.telemetry.leaks as f64,
         on.telemetry.leak_damage as f64 - off.telemetry.leak_damage as f64,
-        on.run.result.seconds - off.run.result.seconds,
+        on.seconds - off.seconds,
         on.telemetry.effective_damage - off.telemetry.effective_damage,
         on.telemetry.overkill_damage - off.telemetry.overkill_damage,
         mean_latency(&on.telemetry) - mean_latency(&off.telemetry),
@@ -1801,8 +1908,43 @@ fn evaluate_prepared(
         utility,
         outcome_score,
         mechanical_score,
-        contexts: prepared.contexts.clone(),
     }
+}
+
+fn sensitivity_example(
+    gene: &SensitivityGene,
+    scenario_seed: u64,
+    context: SensitivityContext,
+    observation: &EffectObservation,
+) -> Value {
+    let fitness = observation.outcome_score * 1_000. + observation.mechanical_score;
+    json!({
+        "fitness":fitness,
+        "scenarioSeed":scenario_seed.to_string(),
+        "screenSeed":scenario_seed.to_string(),
+        "screenWave":context.screen_wave,
+        "map":context.map,
+        "enemySpeedFactor":context.enemy_speed_factor,
+        "rangeFactor":context.range_factor,
+        "hpFactor":context.hp_factor,
+        "countFactor":context.count_factor,
+        "activationWave":context.activation_wave,
+        "rushProximity":context.rush_proximity,
+        "focusTower":context.focus_tower,
+        "sellStrategy":context.sell_strategy,
+        "sellSlot":context.sell_slot,
+        "sellScheduled":context.sell_scheduled,
+        "reactionTicks":context.reaction_ticks,
+        "apm":context.apm,
+        "context":context.json(),
+        "genome":gene.genome.to_vector(),
+        "effect":{
+            "metrics":EFFECT_METRICS.iter().zip(observation.metrics).collect::<BTreeMap<_,_>>(),
+            "utility":observation.utility,
+            "outcomeScore":observation.outcome_score,
+            "mechanicalScore":observation.mechanical_score,
+        }
+    })
 }
 
 fn mutate_gene(parent: &SensitivityGene, rng: &mut Xoshiro) -> SensitivityGene {
@@ -1900,9 +2042,16 @@ fn sensitivity(args: &[String]) {
         .and_then(|x| x.parse().ok())
         .unwrap_or(20260719u64);
     let max_wave = args.get(6).and_then(|x| x.parse().ok()).unwrap_or(25usize);
+    let late_screen_wave = max_wave.max(50);
     assert!(broad_scenarios > 0 && ga_generations > 0 && ga_population >= 2);
     let started = Instant::now();
     let mut broad = SensitivityAccumulator::new();
+    let base_perks: Vec<_> = (0..12)
+        .filter(|&perk| sensitivity_screen_wave(perk, max_wave) == max_wave)
+        .collect();
+    let late_perks: Vec<_> = (0..12)
+        .filter(|&perk| sensitivity_screen_wave(perk, max_wave) > max_wave)
+        .collect();
     let chunk = 2_000usize;
     for start in (0..broad_scenarios).step_by(chunk) {
         let end = (start + chunk).min(broad_scenarios);
@@ -1912,23 +2061,31 @@ fn sensitivity(args: &[String]) {
             .fold(SensitivityAccumulator::new, |mut accumulator, index| {
                 let gene = broad_gene(seed, index);
                 let scenario_seed = seed.wrapping_add(index as u64 * 104_729);
-                let prepared = prepare_sensitivity(&gene, scenario_seed, max_wave);
-                let late_prepared =
-                    (max_wave < 50).then(|| prepare_sensitivity(&gene, scenario_seed, 50));
+                let prepared = prepare_sensitivity(&gene, scenario_seed, max_wave, true);
+                let late_prepared = (max_wave < late_screen_wave)
+                    .then(|| prepare_sensitivity(&gene, scenario_seed, late_screen_wave, true));
                 accumulator.policy_runs += 1 + u64::from(late_prepared.is_some());
-                let observations: Vec<_> = (0..12)
-                    .into_par_iter()
-                    .map(|perk| {
-                        let scenario = if sensitivity_screen_wave(perk, max_wave) > max_wave {
-                            late_prepared.as_ref().unwrap()
-                        } else {
-                            &prepared
-                        };
-                        evaluate_prepared(scenario, perk, gene.activation_wave)
-                    })
-                    .collect();
-                for (perk, observation) in observations.iter().enumerate() {
-                    accumulator.record(perk, observation);
+                for (perk, observation) in
+                    evaluate_prepared_batch(&prepared, &base_perks, gene.activation_wave)
+                {
+                    accumulator.record(
+                        perk,
+                        &observation,
+                        prepared.context,
+                        &prepared.interaction_labels,
+                    );
+                }
+                if let Some(late_prepared) = &late_prepared {
+                    for (perk, observation) in
+                        evaluate_prepared_batch(late_prepared, &late_perks, gene.activation_wave)
+                    {
+                        accumulator.record(
+                            perk,
+                            &observation,
+                            late_prepared.context,
+                            &late_prepared.interaction_labels,
+                        );
+                    }
                 }
                 accumulator
             })
@@ -1946,6 +2103,7 @@ fn sensitivity(args: &[String]) {
     let mut targeted: Vec<EffectStats> = (0..12).map(|_| EffectStats::new()).collect();
     let mut full_wave: Vec<EffectStats> = (0..12).map(|_| EffectStats::new()).collect();
     let mut best_examples = vec![Value::Null; 12];
+    let mut best_full_wave_examples = vec![Value::Null; 12];
     let mut targeted_policy_runs = 0u64;
     let mut full_policy_runs = 0u64;
     for perk in 0..12 {
@@ -1953,7 +2111,8 @@ fn sensitivity(args: &[String]) {
         let mut population: Vec<_> = (0..ga_population)
             .map(|index| broad_gene(seed ^ perk as u64, index + perk * ga_population))
             .collect();
-        let mut last_ranked = vec![];
+        let mut hall_of_fame: Vec<(f64, SensitivityGene, EffectObservation, SensitivityContext)> =
+            vec![];
         for generation in 0..ga_generations {
             let mut ranked: Vec<_> = population
                 .into_par_iter()
@@ -1964,72 +2123,74 @@ fn sensitivity(args: &[String]) {
                         &gene,
                         scenario_seed,
                         sensitivity_screen_wave(perk, max_wave),
+                        false,
                     );
                     let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
                     let fitness = observation.outcome_score * 1_000. + observation.mechanical_score;
-                    (fitness, gene, observation)
+                    (fitness, gene, observation, prepared.context)
                 })
                 .collect();
             targeted_policy_runs += ranked.len() as u64;
-            for (_, _, observation) in &ranked {
-                targeted[perk].push(observation)
+            for (_, _, observation, context) in &ranked {
+                targeted[perk].push(observation, *context)
             }
             ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
+            hall_of_fame.extend(ranked.iter().take(64).cloned());
+            hall_of_fame.sort_by(|a, b| b.0.total_cmp(&a.0));
+            hall_of_fame.truncate(64);
             eprintln!(
                 "sensitivity target {} generation {}/{}: best {:.3}",
                 PERK_NAMES[perk],
                 generation + 1,
                 ga_generations,
-                ranked[0].0
+                hall_of_fame[0].0
             );
             let elite_count = (ga_population / 8).max(2).min(ranked.len());
             let elites: Vec<_> = ranked[..elite_count]
                 .iter()
-                .map(|(_, gene, _)| gene.clone())
+                .map(|(_, gene, _, _)| gene.clone())
                 .collect();
             population = (0..ga_population)
-                .map(|index| {
-                    if index < elite_count {
-                        elites[index].clone()
-                    } else {
-                        let parent = &elites[rng.next_u64() as usize % elites.len()];
-                        mutate_gene(parent, &mut rng)
-                    }
+                .map(|_| {
+                    let parent = &elites[rng.next_u64() as usize % elites.len()];
+                    mutate_gene(parent, &mut rng)
                 })
                 .collect();
-            last_ranked = ranked;
         }
-        let finalists = last_ranked.len().min(64);
-        for (index, (_, gene, _)) in last_ranked.iter().take(finalists).enumerate() {
-            let scenario_seed = seed
-                .wrapping_add(9_000_000_000)
-                .wrapping_add(perk as u64 * 10_000)
-                .wrapping_add(index as u64);
-            let prepared = prepare_sensitivity(gene, scenario_seed, 50);
-            let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
-            full_wave[perk].push(&observation);
-            full_policy_runs += 1;
+        let finalists = hall_of_fame.len().min(64);
+        let finalist_observations: Vec<_> = hall_of_fame
+            .par_iter()
+            .take(finalists)
+            .enumerate()
+            .map(|(index, (_, gene, _, _))| {
+                let scenario_seed = seed
+                    .wrapping_add(9_000_000_000)
+                    .wrapping_add(perk as u64 * 10_000)
+                    .wrapping_add(index as u64);
+                let prepared = prepare_sensitivity(gene, scenario_seed, late_screen_wave, false);
+                let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
+                let fitness = observation.outcome_score * 1_000. + observation.mechanical_score;
+                (
+                    fitness,
+                    scenario_seed,
+                    gene.clone(),
+                    observation,
+                    prepared.context,
+                )
+            })
+            .collect();
+        full_policy_runs += finalist_observations.len() as u64;
+        for (_, _, _, observation, context) in &finalist_observations {
+            full_wave[perk].push(observation, *context);
         }
-        let best = &last_ranked[0];
-        best_examples[perk] = json!({
-            "fitness":best.0,
-            "screenSeed":best.1.trial_seed,
-            "map":best.1.map,
-            "enemySpeedFactor":SPEED_LEVELS[best.1.speed_level],
-            "rangeFactor":RANGE_LEVELS[best.1.range_level],
-            "hpFactor":HP_LEVELS[best.1.hp_level],
-            "countFactor":COUNT_LEVELS[best.1.count_level],
-            "activationWave":best.1.activation_wave,
-            "focusTower":best.1.focus_tower,
-            "reactionTicks":best.1.genome.reaction_ticks,
-            "apm":best.1.genome.apm,
-            "effect":{
-                "metrics":EFFECT_METRICS.iter().zip(best.2.metrics).collect::<BTreeMap<_,_>>(),
-                "utility":best.2.utility,
-                "outcomeScore":best.2.outcome_score,
-                "mechanicalScore":best.2.mechanical_score,
-            }
-        });
+        let best = &hall_of_fame[0];
+        best_examples[perk] = sensitivity_example(&best.1, best.1.trial_seed, best.3, &best.2);
+        let best_full = finalist_observations
+            .iter()
+            .max_by(|left, right| left.0.total_cmp(&right.0))
+            .unwrap();
+        best_full_wave_examples[perk] =
+            sensitivity_example(&best_full.2, best_full.1, best_full.4, &best_full.3);
     }
 
     let broad_pairs = broad_scenarios as u64 * 12;
@@ -2037,8 +2198,11 @@ fn sensitivity(args: &[String]) {
     let full_pairs = full_policy_runs;
     let total_pairs = broad_pairs + targeted_pairs + full_pairs;
     let policy_runs = broad.policy_runs + targeted_policy_runs + full_policy_runs;
-    let counterfactual_runs = total_pairs * 2;
-    let total_simulation_runs = policy_runs + counterfactual_runs;
+    let counterfactual_logical_arms = total_pairs * 2;
+    let broad_prefix_groups =
+        broad_scenarios as u64 * if max_wave < late_screen_wave { 2 } else { 1 };
+    let counterfactual_prefix_groups = broad_prefix_groups + targeted_pairs + full_pairs;
+    let total_logical_simulations = policy_runs + counterfactual_logical_arms;
     let elapsed = started.elapsed().as_secs_f64();
     let perks = (0..12)
         .map(|perk| {
@@ -2050,6 +2214,7 @@ fn sensitivity(args: &[String]) {
                 "targeted":targeted[perk].json(),
                 "fullWaveValidation":full_wave[perk].json(),
                 "bestAdversarialExample":best_examples[perk],
+                "bestFullWaveExample":best_full_wave_examples[perk],
             })
         })
         .collect::<Vec<_>>();
@@ -2059,15 +2224,16 @@ fn sensitivity(args: &[String]) {
         .map(|(key, stats)| (key.clone(), stats.json()))
         .collect::<serde_json::Map<_, _>>();
     let report = json!({
-        "schema":2,
+        "schema":3,
         "kind":"perk-sensitivity",
-        "seed":seed,
+        "seed":seed.to_string(),
         "config":{
             "broadScenarios":broad_scenarios,
             "gaGenerations":ga_generations,
             "gaPopulation":ga_population,
+            "gaElitesReevaluated":false,
             "screenMaxWave":max_wave,
-            "lateScreenWave":50,
+            "lateScreenWave":late_screen_wave,
             "lateScreenPerks":[PERK_NAMES[8],PERK_NAMES[10],PERK_NAMES[11]],
             "fullWaveFinalistsPerPerk":ga_population.min(64),
             "corpusDimensions":{
@@ -2082,11 +2248,21 @@ fn sensitivity(args: &[String]) {
                 "policyVariation":["placements","tower priorities","branches","merges","fusions","doctrines","powerups","early calls","reaction delay","APM","sell timing and target"]
             }
         },
-        "counts":{"pairedComparisons":total_pairs,"counterfactualRuns":counterfactual_runs,"policyGenerationRuns":policy_runs,"totalSimulationRuns":total_simulation_runs,"broadPairs":broad_pairs,"targetedPairs":targeted_pairs,"fullWavePairs":full_pairs},
+        "counts":{"pairedComparisons":total_pairs,"counterfactualLogicalArms":counterfactual_logical_arms,"counterfactualPrefixGroups":counterfactual_prefix_groups,"policyGenerationRuns":policy_runs,"totalLogicalSimulations":total_logical_simulations,"broadPairs":broad_pairs,"targetedPairs":targeted_pairs,"fullWavePairs":full_pairs},
+        "execution":{
+            "countUnit":"logical-complete-simulation-output",
+            "sharedPreInterventionPrefixes":true,
+            "broadPrefixesSharedAcrossPerks":true,
+            "policyCheckpointsReused":true,
+            "naturalPolicyBaselineArmsReused":true,
+            "compactSensitivityResults":true,
+            "countSemantics":"Logical complete outputs; common pre-intervention ticks execute once, and an already-executed natural policy arm is reused when it is exactly identical."
+        },
         "elapsedSeconds":elapsed,
         "threads":rayon::current_num_threads(),
-        "simulationRunsPerSecond":total_simulation_runs as f64/elapsed.max(f64::MIN_POSITIVE),
+        "logicalSimulationsPerSecond":total_logical_simulations as f64/elapsed.max(f64::MIN_POSITIVE),
         "effectConvention":"all deltas are perk-on minus perk-off under identical seed, map, params, and action queue",
+        "inferenceCaveat":"Broad-phase confidence intervals are inferential for the fixed stratified corpus; adaptive targeted and full-wave confidence intervals are descriptive because the genetic search selected those samples.",
         "classificationCaveat":"mechanically inactive means no observed effect in this executed corpus and adversarial search, not a mathematical proof over an infinite state space",
         "classificationRules":{
             "mechanically inactive":"no measured outcome or mechanical delta in broad, targeted, or full-wave phases",

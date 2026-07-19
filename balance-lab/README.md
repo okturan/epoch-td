@@ -77,14 +77,24 @@ Each observation is
 an exact common-random-number pair: identical seed, parameters, map, and action
 queue, with one doctrine forced off versus on. It reports paired deltas and 95%
 confidence intervals for survival wave, lives, gold, leaks, leak damage, clear
-time, effective and overkill damage, projectile latency, and wasted shots.
+time, effective and overkill damage, projectile latency, and wasted shots. The
+broad-corpus intervals summarize a fixed sample. Intervals from the genetic
+search and its finalists are descriptive because those candidates were selected
+adaptively.
 
 After the broad pass, a genetic search targets the largest outcome or mechanical
 effect for each doctrine separately, then replays finalists through wave 50.
 Projectile-speed results are additionally stratified by homing, splash, enemy
 speed, range, map geometry, tower composition, reaction timing, and rush
-proximity. The default executes 2,036,352 paired comparisons and 5,109,056 total
-simulation runs. Its output is `out/sensitivity-report.json`. Classifications
+proximity. The default produces 2,036,352 paired comparisons and 5,109,056
+logical simulation outputs, including policy generation. Common
+pre-intervention ticks execute once and are cloned across paired arms and, in
+the broad corpus, across perks. The runner also reuses the generated policy's
+natural arm when it is byte-for-byte the required off or on result. These
+counts are logical outputs, not independent full starts. Its output is
+`out/sensitivity-report.json`; each doctrine keeps the exact seed, policy
+genome, scenario settings, and measured effect for its best targeted and
+full-wave examples. Classifications
 mean "observed under this finite corpus and adversarial search"; they are not a
 proof over every possible state and do not automatically modify or delete a
 doctrine.

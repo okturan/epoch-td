@@ -4,6 +4,14 @@ use std::collections::BTreeMap;
 pub const DT: f64 = 1.0 / 30.0;
 const W: i32 = 14;
 const H: i32 = 9;
+const LEVEL_MULTIPLIERS: [f64; 6] = [1., 1.5, 2.25, 3.375, 5.0625, 7.59375];
+
+fn level_multiplier(level: u8) -> f64 {
+    LEVEL_MULTIPLIERS
+        .get(level as usize)
+        .copied()
+        .unwrap_or_else(|| 1.5f64.powi(level as i32))
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Modifiers {
@@ -998,7 +1006,7 @@ struct Enemy {
     slow_f: f64,
     leaked: bool,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct EnemySoa {
     id: Vec<u64>,
     row: Vec<Wave>,
@@ -1011,20 +1019,20 @@ struct EnemySoa {
     armor: Vec<f64>,
     regen: Vec<f64>,
     cap: Vec<f64>,
-    dash: Vec<bool>,
+    dash: Vec<u8>,
     dc: Vec<f64>,
     inc: Vec<f64>,
-    split: Vec<bool>,
+    split: Vec<u8>,
     bounty: Vec<f64>,
     leak: Vec<i32>,
-    boss: Vec<bool>,
+    boss: Vec<u8>,
     burn_n: Vec<f64>,
     burn_t: Vec<f64>,
     burn_p: Vec<f64>,
     irr: Vec<f64>,
     slow: Vec<f64>,
     slow_f: Vec<f64>,
-    leaked: Vec<bool>,
+    leaked: Vec<u8>,
 }
 impl EnemySoa {
     fn with_capacity(n: usize) -> Self {
@@ -1046,17 +1054,20 @@ impl EnemySoa {
         self.id.is_empty()
     }
     fn push(&mut self, e: Enemy) {
-        assert!(self.len() < self.id.capacity(), "enemy arena exhausted");
         macro_rules! p{($($f:ident),*)=>{$(self.$f.push(e.$f);)*}}
         p!(
-            id, row, d, x, y, hp, max, speed, armor, regen, cap, dash, dc, inc, split, bounty,
-            leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, leaked
+            id, row, d, x, y, hp, max, speed, armor, regen, cap, dc, inc, bounty, leak, burn_n,
+            burn_t, burn_p, irr, slow, slow_f
         );
+        self.dash.push(u8::from(e.dash));
+        self.split.push(u8::from(e.split));
+        self.boss.push(u8::from(e.boss));
+        self.leaked.push(u8::from(e.leaked));
     }
     fn retain_alive(&mut self) {
         let mut w = 0;
         for i in 0..self.len() {
-            if !self.leaked[i] && self.hp[i] > 0. {
+            if self.leaked[i] == 0 && self.hp[i] > 0. {
                 if i != w {
                     self.id[w] = self.id[i];
                     self.row[w] = self.row[i].clone();
@@ -1112,7 +1123,7 @@ struct Projectile {
     tower_slot: usize,
     born_at: f64,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct ProjectileSoa {
     x: Vec<f64>,
     y: Vec<f64>,
@@ -1123,40 +1134,37 @@ struct ProjectileSoa {
     damage: Vec<f64>,
     splash: Vec<f64>,
     kb: Vec<f64>,
-    pierce: Vec<bool>,
+    pierce: Vec<u8>,
     burn: Vec<f64>,
-    irr: Vec<bool>,
-    slow: Vec<bool>,
+    irr: Vec<u8>,
+    slow: Vec<u8>,
     tower_slot: Vec<usize>,
     born_at: Vec<f64>,
 }
 impl ProjectileSoa {
     fn with_capacity(n: usize) -> Self {
         let mut s = Self::default();
-        macro_rules! r{($($f:ident),*)=>{$(s.$f.reserve(n);)*}}
+        s.reserve(n);
+        s
+    }
+    fn reserve(&mut self, n: usize) {
+        macro_rules! r{($($f:ident),*)=>{$(self.$f.reserve(n);)*}}
         r!(
             x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
             tower_slot, born_at
         );
-        s
     }
     fn len(&self) -> usize {
         self.x.len()
     }
-    fn clear(&mut self) {
-        macro_rules! c{($($f:ident),*)=>{$(self.$f.clear();)*}}
-        c!(
-            x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
-            tower_slot, born_at
-        );
-    }
     fn push(&mut self, p: Projectile) {
-        assert!(self.len() < self.x.capacity(), "projectile arena exhausted");
         macro_rules! q{($($f:ident),*)=>{$(self.$f.push(p.$f);)*}}
         q!(
-            x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
-            tower_slot, born_at
+            x, y, target, target_x, target_y, v, damage, splash, kb, burn, tower_slot, born_at
         );
+        self.pierce.push(u8::from(p.pierce));
+        self.irr.push(u8::from(p.irr));
+        self.slow.push(u8::from(p.slow));
     }
     fn get(&self, i: usize) -> Projectile {
         Projectile {
@@ -1169,13 +1177,29 @@ impl ProjectileSoa {
             damage: self.damage[i],
             splash: self.splash[i],
             kb: self.kb[i],
-            pierce: self.pierce[i],
+            pierce: self.pierce[i] != 0,
             burn: self.burn[i],
-            irr: self.irr[i],
-            slow: self.slow[i],
+            irr: self.irr[i] != 0,
+            slow: self.slow[i] != 0,
             tower_slot: self.tower_slot[i],
             born_at: self.born_at[i],
         }
+    }
+    fn set(&mut self, i: usize, p: Projectile) {
+        macro_rules! s{($($f:ident),*)=>{$(self.$f[i]=p.$f;)*}}
+        s!(
+            x, y, target, target_x, target_y, v, damage, splash, kb, burn, tower_slot, born_at
+        );
+        self.pierce[i] = u8::from(p.pierce);
+        self.irr[i] = u8::from(p.irr);
+        self.slow[i] = u8::from(p.slow);
+    }
+    fn truncate(&mut self, n: usize) {
+        macro_rules! t{($($f:ident),*)=>{$(self.$f.truncate(n);)*}}
+        t!(
+            x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
+            tower_slot, born_at
+        );
     }
 }
 #[derive(Clone, Debug)]
@@ -1298,6 +1322,16 @@ pub struct CounterfactualRun {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CounterfactualSummary {
+    pub wave: usize,
+    pub lives: i32,
+    pub gold: f64,
+    pub seconds: f64,
+    pub telemetry: Telemetry,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DebugTick {
     pub tick: usize,
     pub gold: f64,
@@ -1308,6 +1342,7 @@ pub struct DebugTick {
     pub tower_damage: Vec<f64>,
 }
 
+#[derive(Clone)]
 pub struct Sim {
     pub params: Params,
     map: usize,
@@ -1321,9 +1356,7 @@ pub struct Sim {
     enemies: EnemySoa,
     towers: Vec<Tower>,
     projectiles: ProjectileSoa,
-    projectile_scratch: ProjectileSoa,
     born_scratch: Vec<Wave>,
-    hit_scratch: Vec<usize>,
     split_scratch: Vec<(Wave, f64, Option<f64>)>,
     kills: u64,
     over: bool,
@@ -1348,15 +1381,13 @@ impl Sim {
             lives: 20,
             wave: 0,
             phase_wave: false,
-            spawns: Vec::with_capacity(128),
+            spawns: Vec::with_capacity(4),
             t: 0.,
-            enemies: EnemySoa::with_capacity(2048),
-            towers: Vec::with_capacity(80),
-            projectiles: ProjectileSoa::with_capacity(8192),
-            projectile_scratch: ProjectileSoa::with_capacity(8192),
-            born_scratch: Vec::with_capacity(128),
-            hit_scratch: Vec::with_capacity(2048),
-            split_scratch: Vec::with_capacity(4096),
+            enemies: EnemySoa::with_capacity(256),
+            towers: Vec::with_capacity(32),
+            projectiles: ProjectileSoa::with_capacity(1024),
+            born_scratch: Vec::with_capacity(4),
+            split_scratch: Vec::with_capacity(64),
             kills: 0,
             over: false,
             won: false,
@@ -1371,6 +1402,12 @@ impl Sim {
         };
         s.set_map(map);
         s
+    }
+    fn fork(&self) -> Self {
+        let mut fork = self.clone();
+        fork.born_scratch.reserve(4);
+        fork.split_scratch.reserve(16);
+        fork
     }
     fn apply_initial(&mut self, initial: Option<&InitialState>) {
         let Some(initial) = initial else { return };
@@ -1451,14 +1488,14 @@ impl Sim {
     fn on_path(&self, x: i32, y: i32) -> bool {
         self.path.contains(&(x, y))
     }
-    fn modifiers(&self, t: &Tower) -> Modifiers {
+    fn modifiers(&self, t: &Tower) -> Option<&Modifiers> {
         if let Some(f) = t.fusion {
-            self.params.fusions[f].modifiers.clone()
+            Some(&self.params.fusions[f].modifiers)
         } else {
             match t.branch {
-                1 => self.params.towers[t.i].branch1.clone(),
-                2 => self.params.towers[t.i].branch2.clone(),
-                _ => Modifiers::default(),
+                1 => Some(&self.params.towers[t.i].branch1),
+                2 => Some(&self.params.towers[t.i].branch2),
+                _ => None,
             }
         }
     }
@@ -1482,9 +1519,9 @@ impl Sim {
                     self.towers[j].level,
                 );
                 if kind == 8 {
-                    self.towers[i].buff = self.towers[i].buff.max(
-                        1. + (if branch == 1 { 0.5 } else { 0.25 }) * 1.5f64.powi(level as i32),
-                    );
+                    self.towers[i].buff = self.towers[i]
+                        .buff
+                        .max(1. + (if branch == 1 { 0.5 } else { 0.25 }) * level_multiplier(level));
                 }
                 if kind == 3 {
                     self.towers[i].fire = true
@@ -1730,11 +1767,11 @@ impl Sim {
                 let damage = self.params.rules.meteor_damage
                     * self.params.constants.hp
                     * self.params.constants.growth.powi(self.wave as i32);
+                let radius_sq = self.params.rules.meteor_radius * self.params.rules.meteor_radius;
                 for i in 0..self.enemies.len() {
-                    if (self.enemies.x[i] - x as f64).powi(2)
-                        + (self.enemies.y[i] - y as f64).powi(2)
-                        <= self.params.rules.meteor_radius.powi(2)
-                    {
+                    let dx = self.enemies.x[i] - x as f64;
+                    let dy = self.enemies.y[i] - y as f64;
+                    if dx * dx + dy * dy <= radius_sq {
                         self.enemies.hp[i] -= damage;
                     }
                 }
@@ -1785,8 +1822,9 @@ impl Sim {
         self.enemies.push(e)
     }
     fn in_range(t: &Tower, enemies: &EnemySoa, i: usize, r: f64) -> bool {
-        (enemies.x[i] - t.x as f64 - 0.5).powi(2) + (enemies.y[i] - t.y as f64 - 0.5).powi(2)
-            <= r * r
+        let dx = enemies.x[i] - t.x as f64 - 0.5;
+        let dy = enemies.y[i] - t.y as f64 - 0.5;
+        dx * dx + dy * dy <= r * r
     }
     fn enemy_idx(&self, id: u64) -> Option<usize> {
         self.enemies
@@ -1847,10 +1885,6 @@ impl Sim {
         for j in &mut self.spawns {
             j.st -= dt;
             if j.st <= 0. && j.sn < j.row.n {
-                assert!(
-                    self.born_scratch.len() < self.born_scratch.capacity(),
-                    "spawn scratch exhausted"
-                );
                 self.born_scratch.push(j.row.clone());
                 j.sn += 1;
                 j.st += if j.row.rush { 0.28 } else { 0.8 }
@@ -1863,25 +1897,73 @@ impl Sim {
         }
         self.born_scratch = born_rows;
         for ti in 0..self.towers.len() {
-            let spec = self.params.towers[self.towers[ti].i].clone();
-            let b = self.modifiers(&self.towers[ti]);
+            let spec = &self.params.towers[self.towers[ti].i];
+            let (spec_ramp, spec_aura, spec_field, spec_beam) =
+                (spec.ramp, spec.aura, spec.field, spec.beam);
+            if !spec_aura && !spec_field && !spec_beam {
+                self.towers[ti].cd -= dt
+                    * self.towers[ti].buff
+                    * if self.overdrive > 0. {
+                        self.params.rules.overdrive_multiplier
+                    } else {
+                        1.
+                    };
+                // Non-ramping towers cannot change any state through targeting
+                // until they are ready to fire. Avoid all modifier and range
+                // work while their cooldown is still positive.
+                if !spec_ramp && self.towers[ti].cd > 0. {
+                    continue;
+                }
+            }
+            let (
+                spec_damage,
+                spec_rate,
+                spec_range,
+                spec_splash,
+                spec_pierce,
+                spec_burn,
+                spec_knockback,
+                spec_homing,
+            ) = (
+                spec.damage,
+                spec.rate,
+                spec.range,
+                spec.splash,
+                spec.pierce,
+                spec.burn,
+                spec.knockback,
+                spec.homing,
+            );
+            let (b_dm, b_sp, b_pv, b_rgm, b_kb, b_pi, b_bu, b_bum, b_hc, b_sf, b_ir, b_sl, b_hr) =
+                self.modifiers(&self.towers[ti]).map_or(
+                    (
+                        None, None, None, None, None, None, None, None, None, None, None, None,
+                        None,
+                    ),
+                    |b| {
+                        (
+                            b.dm, b.sp, b.pv, b.rgm, b.kb, b.pi, b.bu, b.bum, b.hc, b.sf, b.ir,
+                            b.sl, b.hr,
+                        )
+                    },
+                );
             let mult =
-                1.5f64.powi(self.towers[ti].level as i32) * b.dm.unwrap_or(1.) * self.towers[ti].mb;
-            let range = spec.range
-                * b.rgm.unwrap_or(1.)
+                level_multiplier(self.towers[ti].level) * b_dm.unwrap_or(1.) * self.towers[ti].mb;
+            let range = spec_range
+                * b_rgm.unwrap_or(1.)
                 * (1. + 0.06 * self.towers[ti].level as f64)
                 * if self.perk_active(3) {
                     self.params.rules.doctrine_range
                 } else {
                     1.
                 };
-            if spec.field {
+            if spec_field {
                 for ei in 0..self.enemies.len() {
                     if Self::in_range(&self.towers[ti], &self.enemies, ei, range)
                         && self.enemies.slow[ei] < 0.2
                     {
                         self.enemies.slow[ei] = 0.15;
-                        self.enemies.slow_f[ei] = b.sf.unwrap_or(if self.perk_active(11) {
+                        self.enemies.slow_f[ei] = b_sf.unwrap_or(if self.perk_active(11) {
                             self.params.rules.doctrine_slow
                         } else {
                             0.6
@@ -1890,10 +1972,10 @@ impl Sim {
                 }
                 continue;
             }
-            if spec.aura {
+            if spec_aura {
                 for ei in 0..self.enemies.len() {
                     if Self::in_range(&self.towers[ti], &self.enemies, ei, range) {
-                        let d = spec.damage
+                        let d = spec_damage
                             * mult
                             * dt
                             * if self.overdrive > 0. {
@@ -1912,11 +1994,11 @@ impl Sim {
                 }
                 continue;
             }
-            if spec.beam {
+            if spec_beam {
                 let valid = self.towers[ti]
                     .lock
                     .and_then(|id| self.enemy_idx(id))
-                    .filter(|&i| self.enemies.hp[i] > 0. && !self.enemies.leaked[i]);
+                    .filter(|&i| self.enemies.hp[i] > 0. && self.enemies.leaked[i] == 0);
                 if valid.is_none() {
                     let mut chosen: Option<usize> = None;
                     for i in 0..self.enemies.len() {
@@ -1928,8 +2010,8 @@ impl Sim {
                     self.towers[ti].heat = 0.
                 }
                 if let Some(ei) = self.towers[ti].lock.and_then(|id| self.enemy_idx(id)) {
-                    self.towers[ti].heat += dt * b.hr.unwrap_or(1.);
-                    let d = spec.damage
+                    self.towers[ti].heat += dt * b_hr.unwrap_or(1.);
+                    let d = spec_damage
                         * (1. + self.towers[ti].heat)
                         * mult
                         * dt
@@ -1940,7 +2022,7 @@ impl Sim {
                         }
                         * (if self.enemies.irr[ei] > 0. { 1.2 } else { 1. });
                     self.raw(ei, d, Some(ti));
-                    if b.ir.is_some() {
+                    if b_ir.is_some() {
                         self.enemies.irr[ei] = if self.perk_active(10) {
                             self.params.rules.doctrine_irradiate
                         } else {
@@ -1950,22 +2032,15 @@ impl Sim {
                 }
                 continue;
             }
-            self.towers[ti].cd -= dt
-                * self.towers[ti].buff
-                * if self.overdrive > 0. {
-                    self.params.rules.overdrive_multiplier
-                } else {
-                    1.
-                };
             let mut target: Option<usize> = None;
             for i in 0..self.enemies.len() {
                 if !Self::in_range(&self.towers[ti], &self.enemies, i, range)
-                    || (spec.homing && self.enemies.hp[i] <= self.enemies.inc[i])
+                    || (spec_homing && self.enemies.hp[i] <= self.enemies.inc[i])
                 {
                     continue;
                 }
                 let better = target.is_none_or(|old| {
-                    if spec.homing {
+                    if spec_homing {
                         self.enemies.hp[i] - self.enemies.inc[i]
                             > self.enemies.hp[old] - self.enemies.inc[old] + 1e-9
                     } else {
@@ -1976,13 +2051,13 @@ impl Sim {
                     target = Some(i);
                 }
             }
-            if spec.ramp {
+            if spec_ramp {
                 let id = target.map(|i| self.enemies.id[i]);
                 if self.towers[ti].lock != id {
                     self.towers[ti].lock = id;
                     self.towers[ti].heat = 0.
                 } else if id.is_some() {
-                    self.towers[ti].heat = (self.towers[ti].heat + dt).min(b.hc.unwrap_or(6.))
+                    self.towers[ti].heat = (self.towers[ti].heat + dt).min(b_hc.unwrap_or(6.))
                 }
             }
             let Some(ei) = target else {
@@ -1993,53 +2068,52 @@ impl Sim {
             };
             if self.towers[ti].cd <= 0. {
                 self.towers[ti].cd += 1.
-                    / if spec.ramp {
-                        spec.rate + self.towers[ti].heat
+                    / if spec_ramp {
+                        spec_rate + self.towers[ti].heat
                     } else {
-                        spec.rate
+                        spec_rate
                     };
-                let damage = spec.damage * mult;
+                let damage = spec_damage * mult;
                 self.projectiles.push(Projectile {
                     x: self.towers[ti].x as f64 + 0.5,
                     y: self.towers[ti].y as f64 + 0.5,
                     target: self.enemies.id[ei],
                     target_x: self.enemies.x[ei],
                     target_y: self.enemies.y[ei],
-                    v: (if spec.homing { 5. } else { 12. })
+                    v: (if spec_homing { 5. } else { 12. })
                         * (1. + 0.1 * self.towers[ti].level as f64)
-                        * b.pv.unwrap_or(1.)
+                        * b_pv.unwrap_or(1.)
                         * if self.perk_active(8) {
                             self.params.rules.doctrine_projectile_speed
                         } else {
                             1.
                         },
                     damage,
-                    splash: b.sp.unwrap_or(spec.splash),
-                    kb: b.kb.unwrap_or(spec.knockback),
-                    pierce: b.pi.is_some() || spec.pierce,
-                    burn: if spec.burn || b.bu.is_some() {
-                        mult * b.bum.unwrap_or(1.)
+                    splash: b_sp.unwrap_or(spec_splash),
+                    kb: b_kb.unwrap_or(spec_knockback),
+                    pierce: b_pi.is_some() || spec_pierce,
+                    burn: if spec_burn || b_bu.is_some() {
+                        mult * b_bum.unwrap_or(1.)
                     } else if self.towers[ti].fire {
                         1.
                     } else {
                         0.
                     },
-                    irr: self.towers[ti].rad || b.ir.is_some(),
-                    slow: b.sl.is_some(),
+                    irr: self.towers[ti].rad || b_ir.is_some(),
+                    slow: b_sl.is_some(),
                     tower_slot: ti,
                     born_at: self.t,
                 });
                 self.telemetry.projectiles_fired += 1;
-                if spec.homing {
+                if spec_homing {
                     self.enemies.inc[ei] += damage
                 }
             }
         }
-        std::mem::swap(&mut self.projectiles, &mut self.projectile_scratch);
-        self.projectiles.clear();
-        let mut processing = std::mem::take(&mut self.projectile_scratch);
-        for projectile_index in 0..processing.len() {
-            let mut p = processing.get(projectile_index);
+        let processing_len = self.projectiles.len();
+        let mut write_projectile = 0usize;
+        for projectile_index in 0..processing_len {
+            let mut p = self.projectiles.get(projectile_index);
             let target_index = self.enemy_idx(p.target);
             if let Some(ei) = target_index {
                 p.target_x = self.enemies.x[ei];
@@ -2050,13 +2124,12 @@ impl Sim {
             // Match V8 Math.hypot's scaled two-term summation. Small rounding
             // differences here change which simultaneous projectile gets the
             // final hit and eventually cause oracle drift.
-            let scale = dx.abs().max(dy.abs());
-            let len = if scale == 0. {
+            let hi = dx.abs().max(dy.abs());
+            let len = if hi == 0. {
                 0.
             } else {
-                let ax = dx / scale;
-                let ay = dy / scale;
-                scale * (ax * ax + ay * ay).sqrt()
+                let ratio = dx.abs().min(dy.abs()) / hi;
+                hi * (1. + ratio * ratio).sqrt()
             };
             let step = p.v * dt;
             if len <= step {
@@ -2070,28 +2143,21 @@ impl Sim {
                         } else {
                             1.
                         };
-                    let mut hits = std::mem::take(&mut self.hit_scratch);
-                    hits.clear();
-                    assert!(
-                        self.enemies.len() <= hits.capacity(),
-                        "hit scratch exhausted"
-                    );
-                    hits.extend((0..self.enemies.len()).filter(|&i| {
-                        (self.enemies.x[i] - tx).powi(2) + (self.enemies.y[i] - ty).powi(2)
-                            <= splash * splash
-                    }));
-                    for &i in &hits {
-                        if self.enemies.hp[i] > 0. && !self.enemies.leaked[i] {
-                            effective_targets += 1;
+                    for i in 0..self.enemies.len() {
+                        let dx = self.enemies.x[i] - tx;
+                        let dy = self.enemies.y[i] - ty;
+                        if dx * dx + dy * dy <= splash * splash {
+                            if self.enemies.hp[i] > 0. && self.enemies.leaked[i] == 0 {
+                                effective_targets += 1;
+                            }
+                            self.damage(i, p.damage, p.pierce, true, p.tower_slot)
                         }
-                        self.damage(i, p.damage, p.pierce, true, p.tower_slot)
                     }
-                    self.hit_scratch = hits;
-                    if let Some(i) = self.enemy_idx(p.target) {
+                    if let Some(i) = target_index {
                         self.enemies.inc[i] -= p.damage
                     }
                 } else if let Some(ei) =
-                    target_index.filter(|&i| self.enemies.hp[i] > 0. && !self.enemies.leaked[i])
+                    target_index.filter(|&i| self.enemies.hp[i] > 0. && self.enemies.leaked[i] == 0)
                 {
                     effective_targets = 1;
                     self.damage(ei, p.damage, p.pierce, false, p.tower_slot)
@@ -2108,7 +2174,7 @@ impl Sim {
                                 } else {
                                     1.
                                 }
-                                * (if self.enemies.boss[i] {
+                                * (if self.enemies.boss[i] != 0 {
                                     if self.perk_active(6) {
                                         self.params.rules.doctrine_boss_knockback
                                     } else {
@@ -2144,20 +2210,20 @@ impl Sim {
             } else {
                 p.x += dx / len * step;
                 p.y += dy / len * step;
-                self.projectiles.push(p)
+                self.projectiles.set(write_projectile, p);
+                write_projectile += 1;
             }
         }
-        processing.clear();
-        self.projectile_scratch = processing;
+        self.projectiles.truncate(write_projectile);
         let plen = (self.path.len() - 1) as f64;
         for ei in 0..self.enemies.len() {
-            if self.enemies.dash[ei] {
+            if self.enemies.dash[ei] != 0 {
                 self.enemies.dc[ei] -= dt;
                 if self.enemies.dc[ei] <= 0. {
                     self.enemies.dc[ei] += 2.5
                 }
             }
-            let sm = (if self.enemies.dash[ei] && self.enemies.dc[ei] < 0.6 {
+            let sm = (if self.enemies.dash[ei] != 0 && self.enemies.dc[ei] < 0.6 {
                 2.4
             } else {
                 1.
@@ -2191,16 +2257,14 @@ impl Sim {
                     self.enemies.burn_n[ei] = 0.
                 }
             }
-        }
-        for i in 0..self.enemies.len() {
-            let p = self.pos(self.enemies.d[i].min(plen));
-            self.enemies.x[i] = p.0;
-            self.enemies.y[i] = p.1;
-            if self.enemies.d[i] >= plen && !self.enemies.leaked[i] {
-                self.enemies.leaked[i] = true;
-                self.lives -= self.enemies.leak[i];
+            let p = self.pos(self.enemies.d[ei].min(plen));
+            self.enemies.x[ei] = p.0;
+            self.enemies.y[ei] = p.1;
+            if self.enemies.d[ei] >= plen && self.enemies.leaked[ei] == 0 {
+                self.enemies.leaked[ei] = 1;
+                self.lives -= self.enemies.leak[ei];
                 self.telemetry.leaks += 1;
-                self.telemetry.leak_damage += i64::from(self.enemies.leak[i]);
+                self.telemetry.leak_damage += i64::from(self.enemies.leak[ei]);
             }
         }
         // A JS projectile owns a reference to its target object. Update the
@@ -2219,36 +2283,36 @@ impl Sim {
         }
         let mut dead = std::mem::take(&mut self.split_scratch);
         dead.clear();
-        assert!(
-            self.enemies.len().saturating_mul(2) <= dead.capacity(),
-            "split scratch exhausted"
-        );
-        for i in (0..self.enemies.len()).filter(|&i| {
-            !self.enemies.leaked[i] && self.enemies.hp[i] <= 0. && self.enemies.split[i]
-        }) {
-            dead.push((
-                self.enemies.row[i].clone(),
-                (self.enemies.d[i] - 0.6).max(0.),
-                Some(0.4),
-            ));
-            dead.push((
-                self.enemies.row[i].clone(),
-                (self.enemies.d[i] - 1.2).max(0.),
-                Some(0.4),
-            ));
-        }
+        let mut removed = false;
         for i in 0..self.enemies.len() {
-            if !self.enemies.leaked[i] && self.enemies.hp[i] <= 0. {
+            if self.enemies.leaked[i] == 0 && self.enemies.hp[i] <= 0. {
+                if self.enemies.split[i] != 0 {
+                    dead.push((
+                        self.enemies.row[i].clone(),
+                        (self.enemies.d[i] - 0.6).max(0.),
+                        Some(0.4),
+                    ));
+                    dead.push((
+                        self.enemies.row[i].clone(),
+                        (self.enemies.d[i] - 1.2).max(0.),
+                        Some(0.4),
+                    ));
+                }
                 self.gold += self.enemies.bounty[i]
                     + if self.perk_active(1) {
                         self.params.rules.doctrine_bounty
                     } else {
                         0.
                     };
-                self.kills += 1
+                self.kills += 1;
+                removed = true;
+            } else if self.enemies.leaked[i] != 0 {
+                removed = true;
             }
         }
-        self.enemies.retain_alive();
+        if removed {
+            self.enemies.retain_alive();
+        }
         for (drow, d, f) in dead.drain(..) {
             self.spawn_enemy(drow, d, f)
         }
@@ -2335,65 +2399,438 @@ pub fn run(input: &Input, params: Params) -> RunResult {
     run_counterfactual(input, params, None).run
 }
 
+struct ExecutionState {
+    sim: Sim,
+    pending: Vec<Action>,
+    rejected: Vec<Action>,
+    trace: Vec<WaveTrace>,
+    total_seconds: f64,
+    collect_trace: bool,
+    ticks: usize,
+}
+
+pub struct CounterfactualCheckpoint {
+    state: ExecutionState,
+    applied_actions: usize,
+    checkpoint_relics: [bool; 12],
+    final_relics: [bool; 12],
+    baseline: Option<CounterfactualSummary>,
+}
+
+impl CounterfactualCheckpoint {
+    fn state_for_input(&self, input: &Input) -> ExecutionState {
+        let mut state = self.state.fork();
+        state.pending = input.actions[self.applied_actions.min(input.actions.len())..].to_vec();
+        state
+            .pending
+            .sort_by_key(|action| (action.wave, action.tick.unwrap_or(0)));
+        state
+    }
+
+    fn baseline_arm(&self, perk: usize) -> Option<(bool, CounterfactualSummary)> {
+        let enabled = if self.checkpoint_relics[perk] {
+            true
+        } else if !self.final_relics[perk] {
+            false
+        } else {
+            return None;
+        };
+        Some((enabled, self.baseline.as_ref()?.clone()))
+    }
+}
+
+impl ExecutionState {
+    fn new(input: &Input, params: Params) -> Self {
+        Self::with_trace(input, params, true)
+    }
+
+    fn compact(input: &Input, params: Params) -> Self {
+        Self::with_trace(input, params, false)
+    }
+
+    fn with_trace(input: &Input, params: Params, collect_trace: bool) -> Self {
+        let mut sim = Sim::new(params, input.map);
+        sim.endless = input.endless;
+        sim.apply_initial(input.initial.as_ref());
+        let mut pending = input.actions.clone();
+        pending.sort_by_key(|action| (action.wave, action.tick.unwrap_or(0)));
+        Self {
+            sim,
+            pending,
+            rejected: vec![],
+            trace: vec![],
+            total_seconds: 0.,
+            collect_trace,
+            ticks: 0,
+        }
+    }
+
+    fn fork(&self) -> Self {
+        Self {
+            sim: self.sim.fork(),
+            pending: self.pending.clone(),
+            rejected: self.rejected.clone(),
+            trace: self.trace.clone(),
+            total_seconds: self.total_seconds,
+            collect_trace: self.collect_trace,
+            ticks: self.ticks,
+        }
+    }
+}
+
+fn advance_execution(
+    state: &mut ExecutionState,
+    input: &Input,
+    intervention: Option<PerkIntervention>,
+    stop_before_wave: Option<usize>,
+) {
+    while !state.sim.over && state.sim.wave < input.max_wave && state.ticks < 3_000_000 {
+        if stop_before_wave.is_some_and(|wave| state.sim.wave >= wave) {
+            break;
+        }
+        let current_wave = state.sim.wave;
+        if let Some(intervention) = intervention {
+            state.sim.apply_perk_intervention(intervention);
+        }
+        apply_matching_actions(
+            &mut state.sim,
+            &mut state.pending,
+            &mut state.rejected,
+            |action| action.wave <= current_wave && action.tick.is_none() && action.op == "relic",
+        );
+        if !state.sim.pick.is_empty() {
+            state.sim.choose_relic(input.seed);
+        }
+        if let Some(intervention) = intervention {
+            state.sim.apply_perk_intervention(intervention);
+        }
+        apply_matching_actions(
+            &mut state.sim,
+            &mut state.pending,
+            &mut state.rejected,
+            |action| action.wave <= current_wave && action.tick.is_none() && action.op != "relic",
+        );
+        if !state.sim.phase_wave {
+            state.sim.start_wave()
+        }
+        let started = state.sim.t;
+        let mut wave_tick = 0u32;
+        while state.sim.phase_wave && !state.sim.over && state.ticks < 3_000_000 {
+            let current_wave = state.sim.wave;
+            apply_matching_actions(
+                &mut state.sim,
+                &mut state.pending,
+                &mut state.rejected,
+                |action| {
+                    action.wave <= current_wave && action.tick.is_some_and(|tick| tick <= wave_tick)
+                },
+            );
+            state.sim.update(DT);
+            state.ticks += 1;
+            wave_tick += 1;
+        }
+        let seconds = state.sim.t - started;
+        state.total_seconds += round6(seconds);
+        if state.collect_trace {
+            state.trace.push(state.sim.trace(seconds));
+        }
+    }
+}
+
+fn finish_execution(state: ExecutionState, input: &Input) -> CounterfactualRun {
+    let run = RunResult {
+        protocol: 1,
+        seed: input.seed.to_string(),
+        map: input.map,
+        trace: state.trace,
+        rejected: state.rejected,
+        pending: state.pending.len(),
+        result: state.sim.trace(state.total_seconds),
+    };
+    let mut telemetry = state.sim.telemetry;
+    telemetry.wasted_projectiles += state.sim.projectiles.len() as u64;
+    CounterfactualRun { run, telemetry }
+}
+
+fn finish_summary(state: ExecutionState) -> CounterfactualSummary {
+    summarize(&state.sim, state.total_seconds)
+}
+
+fn summarize(sim: &Sim, total_seconds: f64) -> CounterfactualSummary {
+    let mut telemetry = sim.telemetry.clone();
+    telemetry.wasted_projectiles += sim.projectiles.len() as u64;
+    CounterfactualSummary {
+        wave: sim.wave,
+        lives: sim.lives,
+        gold: round6(sim.gold),
+        seconds: round6(total_seconds),
+        telemetry,
+    }
+}
+
 pub fn run_counterfactual(
     input: &Input,
     params: Params,
     intervention: Option<PerkIntervention>,
 ) -> CounterfactualRun {
-    let mut sim = Sim::new(params, input.map);
-    sim.endless = input.endless;
-    sim.apply_initial(input.initial.as_ref());
-    let mut pending = input.actions.clone();
-    pending.sort_by_key(|a| (a.wave, a.tick.unwrap_or(0)));
-    let mut rejected = vec![];
-    let mut trace = vec![];
-    let mut ticks = 0usize;
-    while !sim.over && sim.wave < input.max_wave && ticks < 3_000_000 {
-        let current_wave = sim.wave;
-        if let Some(intervention) = intervention {
-            sim.apply_perk_intervention(intervention);
-        }
-        apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
-            action.wave <= current_wave && action.tick.is_none() && action.op == "relic"
-        });
-        if !sim.pick.is_empty() {
-            sim.choose_relic(input.seed);
-        }
-        if let Some(intervention) = intervention {
-            sim.apply_perk_intervention(intervention);
-        }
-        apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
-            action.wave <= current_wave && action.tick.is_none() && action.op != "relic"
-        });
-        if !sim.phase_wave {
-            sim.start_wave()
-        }
-        let started = sim.t;
-        let mut wave_tick = 0u32;
-        while sim.phase_wave && !sim.over && ticks < 3_000_000 {
-            let current_wave = sim.wave;
-            apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
-                action.wave <= current_wave && action.tick.is_some_and(|tick| tick <= wave_tick)
-            });
-            sim.update(DT);
-            ticks += 1;
-            wave_tick += 1;
-        }
-        trace.push(sim.trace(sim.t - started));
+    let mut state = ExecutionState::new(input, params);
+    advance_execution(&mut state, input, intervention, None);
+    finish_execution(state, input)
+}
+
+pub fn run_counterfactual_pair(
+    input: &Input,
+    params: Params,
+    perk: usize,
+    activation_wave: usize,
+) -> (CounterfactualRun, CounterfactualRun) {
+    let mut prefix = ExecutionState::new(input, params);
+    advance_execution(&mut prefix, input, None, Some(activation_wave));
+    let mut off = prefix.fork();
+    let mut on = prefix;
+    advance_execution(
+        &mut off,
+        input,
+        Some(PerkIntervention {
+            perk,
+            enabled: false,
+            activation_wave,
+        }),
+        None,
+    );
+    advance_execution(
+        &mut on,
+        input,
+        Some(PerkIntervention {
+            perk,
+            enabled: true,
+            activation_wave,
+        }),
+        None,
+    );
+    (finish_execution(off, input), finish_execution(on, input))
+}
+
+pub fn run_counterfactual_batch(
+    input: &Input,
+    params: Params,
+    perks: &[usize],
+    activation_wave: usize,
+) -> Vec<(usize, CounterfactualRun, CounterfactualRun)> {
+    let mut prefix = ExecutionState::new(input, params);
+    advance_execution(&mut prefix, input, None, Some(activation_wave));
+    perks
+        .iter()
+        .map(|&perk| {
+            let mut off = prefix.fork();
+            let mut on = prefix.fork();
+            advance_execution(
+                &mut off,
+                input,
+                Some(PerkIntervention {
+                    perk,
+                    enabled: false,
+                    activation_wave,
+                }),
+                None,
+            );
+            advance_execution(
+                &mut on,
+                input,
+                Some(PerkIntervention {
+                    perk,
+                    enabled: true,
+                    activation_wave,
+                }),
+                None,
+            );
+            (
+                perk,
+                finish_execution(off, input),
+                finish_execution(on, input),
+            )
+        })
+        .collect()
+}
+
+pub fn run_counterfactual_summary_pair(
+    input: &Input,
+    params: Params,
+    perk: usize,
+    activation_wave: usize,
+) -> (CounterfactualSummary, CounterfactualSummary) {
+    let mut prefix = ExecutionState::compact(input, params);
+    advance_execution(&mut prefix, input, None, Some(activation_wave));
+    let mut off = prefix.fork();
+    let mut on = prefix;
+    advance_execution(
+        &mut off,
+        input,
+        Some(PerkIntervention {
+            perk,
+            enabled: false,
+            activation_wave,
+        }),
+        None,
+    );
+    advance_execution(
+        &mut on,
+        input,
+        Some(PerkIntervention {
+            perk,
+            enabled: true,
+            activation_wave,
+        }),
+        None,
+    );
+    (finish_summary(off), finish_summary(on))
+}
+
+pub fn run_counterfactual_summary_batch(
+    input: &Input,
+    params: Params,
+    perks: &[usize],
+    activation_wave: usize,
+) -> Vec<(usize, CounterfactualSummary, CounterfactualSummary)> {
+    let mut prefix = ExecutionState::compact(input, params);
+    advance_execution(&mut prefix, input, None, Some(activation_wave));
+    perks
+        .iter()
+        .map(|&perk| {
+            let mut off = prefix.fork();
+            let mut on = prefix.fork();
+            advance_execution(
+                &mut off,
+                input,
+                Some(PerkIntervention {
+                    perk,
+                    enabled: false,
+                    activation_wave,
+                }),
+                None,
+            );
+            advance_execution(
+                &mut on,
+                input,
+                Some(PerkIntervention {
+                    perk,
+                    enabled: true,
+                    activation_wave,
+                }),
+                None,
+            );
+            (perk, finish_summary(off), finish_summary(on))
+        })
+        .collect()
+}
+
+pub fn run_counterfactual_summary_pair_from_checkpoint(
+    input: &Input,
+    checkpoint: &CounterfactualCheckpoint,
+    perk: usize,
+    activation_wave: usize,
+    reuse_baseline: bool,
+) -> (CounterfactualSummary, CounterfactualSummary) {
+    let prefix = checkpoint.state_for_input(input);
+    if reuse_baseline && let Some((enabled, baseline)) = checkpoint.baseline_arm(perk) {
+        let mut counterfactual = prefix;
+        advance_execution(
+            &mut counterfactual,
+            input,
+            Some(PerkIntervention {
+                perk,
+                enabled: !enabled,
+                activation_wave,
+            }),
+            None,
+        );
+        let counterfactual = finish_summary(counterfactual);
+        return if enabled {
+            (counterfactual, baseline)
+        } else {
+            (baseline, counterfactual)
+        };
     }
-    let total = trace.iter().map(|x| x.seconds).sum();
-    let run = RunResult {
-        protocol: 1,
-        seed: input.seed.to_string(),
-        map: input.map,
-        trace,
-        rejected,
-        pending: pending.len(),
-        result: sim.trace(total),
-    };
-    let mut telemetry = sim.telemetry;
-    telemetry.wasted_projectiles += sim.projectiles.len() as u64;
-    CounterfactualRun { run, telemetry }
+    let mut off = prefix.fork();
+    let mut on = prefix;
+    advance_execution(
+        &mut off,
+        input,
+        Some(PerkIntervention {
+            perk,
+            enabled: false,
+            activation_wave,
+        }),
+        None,
+    );
+    advance_execution(
+        &mut on,
+        input,
+        Some(PerkIntervention {
+            perk,
+            enabled: true,
+            activation_wave,
+        }),
+        None,
+    );
+    (finish_summary(off), finish_summary(on))
+}
+
+pub fn run_counterfactual_summary_batch_from_checkpoint(
+    input: &Input,
+    checkpoint: &CounterfactualCheckpoint,
+    perks: &[usize],
+    activation_wave: usize,
+    reuse_baseline: bool,
+) -> Vec<(usize, CounterfactualSummary, CounterfactualSummary)> {
+    let prefix = checkpoint.state_for_input(input);
+    perks
+        .iter()
+        .map(|&perk| {
+            if reuse_baseline && let Some((enabled, baseline)) = checkpoint.baseline_arm(perk) {
+                let mut counterfactual = prefix.fork();
+                advance_execution(
+                    &mut counterfactual,
+                    input,
+                    Some(PerkIntervention {
+                        perk,
+                        enabled: !enabled,
+                        activation_wave,
+                    }),
+                    None,
+                );
+                let counterfactual = finish_summary(counterfactual);
+                return if enabled {
+                    (perk, counterfactual, baseline)
+                } else {
+                    (perk, baseline, counterfactual)
+                };
+            }
+            let mut off = prefix.fork();
+            let mut on = prefix.fork();
+            advance_execution(
+                &mut off,
+                input,
+                Some(PerkIntervention {
+                    perk,
+                    enabled: false,
+                    activation_wave,
+                }),
+                None,
+            );
+            advance_execution(
+                &mut on,
+                input,
+                Some(PerkIntervention {
+                    perk,
+                    enabled: true,
+                    activation_wave,
+                }),
+                None,
+            );
+            (perk, finish_summary(off), finish_summary(on))
+        })
+        .collect()
 }
 
 pub fn debug_wave(input: &Input, target_wave: usize, params: Params) -> Vec<DebugTick> {
@@ -2613,6 +3050,30 @@ pub fn run_policy(
     max_wave: usize,
     params: Params,
 ) -> PolicyRun {
+    run_policy_internal(genome, seed, map, max_wave, params, None).0
+}
+
+pub fn run_policy_with_checkpoint(
+    genome: &Genome,
+    seed: u64,
+    map: usize,
+    max_wave: usize,
+    params: Params,
+    activation_wave: usize,
+) -> (PolicyRun, CounterfactualCheckpoint) {
+    let (policy, checkpoint) =
+        run_policy_internal(genome, seed, map, max_wave, params, Some(activation_wave));
+    (policy, checkpoint.unwrap())
+}
+
+fn run_policy_internal(
+    genome: &Genome,
+    seed: u64,
+    map: usize,
+    max_wave: usize,
+    params: Params,
+    checkpoint_wave: Option<usize>,
+) -> (PolicyRun, Option<CounterfactualCheckpoint>) {
     let mut sim = Sim::new(params, map);
     sim.endless = max_wave > 50;
     let cells = placement_cells(map, genome.placement);
@@ -2626,9 +3087,28 @@ pub fn run_policy(
     let mut early_calls = 0usize;
     let mut merges = 0;
     let mut ticks = 0usize;
+    let mut total_seconds = 0.;
+    let mut checkpoint = None;
     let recipes = sim.params.fusions.clone();
 
     while !sim.over && sim.wave < max_wave && ticks < 3_000_000 {
+        if checkpoint.is_none() && checkpoint_wave.is_some_and(|wave| sim.wave >= wave) {
+            checkpoint = Some(CounterfactualCheckpoint {
+                state: ExecutionState {
+                    sim: sim.fork(),
+                    pending: vec![],
+                    rejected: vec![],
+                    trace: vec![],
+                    total_seconds,
+                    collect_trace: false,
+                    ticks,
+                },
+                applied_actions: actions.len(),
+                checkpoint_relics: sim.relics,
+                final_relics: [false; 12],
+                baseline: None,
+            });
+        }
         if !sim.pick.is_empty() {
             let relic = *sim
                 .pick
@@ -2896,9 +3376,31 @@ pub fn run_policy(
             ticks += 1;
             wave_tick += 1;
         }
-        trace.push(sim.trace(sim.t - started));
+        let wave_trace = sim.trace(sim.t - started);
+        total_seconds += wave_trace.seconds;
+        trace.push(wave_trace);
     }
-    let total = trace.iter().map(|x| x.seconds).sum();
+    if checkpoint.is_none() && checkpoint_wave.is_some() {
+        checkpoint = Some(CounterfactualCheckpoint {
+            state: ExecutionState {
+                sim: sim.fork(),
+                pending: vec![],
+                rejected: vec![],
+                trace: vec![],
+                total_seconds,
+                collect_trace: false,
+                ticks,
+            },
+            applied_actions: actions.len(),
+            checkpoint_relics: sim.relics,
+            final_relics: [false; 12],
+            baseline: None,
+        });
+    }
+    if let Some(checkpoint) = &mut checkpoint {
+        checkpoint.final_relics = sim.relics;
+        checkpoint.baseline = Some(summarize(&sim, total_seconds));
+    }
     let result = RunResult {
         protocol: 1,
         seed: seed.to_string(),
@@ -2906,19 +3408,22 @@ pub fn run_policy(
         trace,
         rejected: vec![],
         pending: 0,
-        result: sim.trace(total),
+        result: sim.trace(total_seconds),
     };
-    PolicyRun {
-        run: result,
-        actions,
-        fusion_counts,
-        tower_counts,
-        branch_counts,
-        doctrine_counts,
-        power_counts,
-        early_calls,
-        merges,
-    }
+    (
+        PolicyRun {
+            run: result,
+            actions,
+            fusion_counts,
+            tower_counts,
+            branch_counts,
+            doctrine_counts,
+            power_counts,
+            early_calls,
+            merges,
+        },
+        checkpoint,
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -3125,6 +3630,199 @@ mod tests {
             on.run.result.lives - off.run.result.lives,
             params.rules.doctrine_lives
         );
+    }
+
+    #[test]
+    fn shared_prefix_pairs_match_independent_runs() {
+        for map in 0..3 {
+            let mut rng = Xoshiro::new(900 + map as u64);
+            let genome = Genome::random(&mut rng);
+            let seed = 77_000 + map as u64;
+            let policy = run_policy(&genome, seed, map, 15, Params::default());
+            let input = Input {
+                seed,
+                map,
+                max_wave: 15,
+                actions: policy.actions,
+                params: None,
+                initial: None,
+                endless: false,
+            };
+            for activation_wave in [0, 5, 10, 14, 20] {
+                for perk in 0..12 {
+                    let expected_off = run_counterfactual(
+                        &input,
+                        Params::default(),
+                        Some(PerkIntervention {
+                            perk,
+                            enabled: false,
+                            activation_wave,
+                        }),
+                    );
+                    let expected_on = run_counterfactual(
+                        &input,
+                        Params::default(),
+                        Some(PerkIntervention {
+                            perk,
+                            enabled: true,
+                            activation_wave,
+                        }),
+                    );
+                    let (actual_off, actual_on) =
+                        run_counterfactual_pair(&input, Params::default(), perk, activation_wave);
+                    assert_eq!(
+                        serde_json::to_vec(&actual_off).unwrap(),
+                        serde_json::to_vec(&expected_off).unwrap(),
+                        "off mismatch map={map} perk={perk} activation={activation_wave}"
+                    );
+                    assert_eq!(
+                        serde_json::to_vec(&actual_on).unwrap(),
+                        serde_json::to_vec(&expected_on).unwrap(),
+                        "on mismatch map={map} perk={perk} activation={activation_wave}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shared_prefix_batch_matches_individual_pairs() {
+        let mut rng = Xoshiro::new(1_337);
+        let genome = Genome::random(&mut rng);
+        let seed = 91_337;
+        let policy = run_policy(&genome, seed, 2, 15, Params::default());
+        let input = Input {
+            seed,
+            map: 2,
+            max_wave: 15,
+            actions: policy.actions,
+            params: None,
+            initial: None,
+            endless: false,
+        };
+        let perks: Vec<_> = (0..12).collect();
+        let actual = run_counterfactual_batch(&input, Params::default(), &perks, 7);
+        for (perk, actual_off, actual_on) in actual {
+            let (expected_off, expected_on) =
+                run_counterfactual_pair(&input, Params::default(), perk, 7);
+            assert_eq!(
+                serde_json::to_vec(&actual_off).unwrap(),
+                serde_json::to_vec(&expected_off).unwrap(),
+                "off mismatch perk={perk}"
+            );
+            assert_eq!(
+                serde_json::to_vec(&actual_on).unwrap(),
+                serde_json::to_vec(&expected_on).unwrap(),
+                "on mismatch perk={perk}"
+            );
+        }
+    }
+
+    #[test]
+    fn compact_counterfactuals_match_full_results() {
+        let mut rng = Xoshiro::new(4_242);
+        let genome = Genome::random(&mut rng);
+        let seed = 104_242;
+        let policy = run_policy(&genome, seed, 1, 20, Params::default());
+        let input = Input {
+            seed,
+            map: 1,
+            max_wave: 20,
+            actions: policy.actions,
+            params: None,
+            initial: None,
+            endless: false,
+        };
+        for activation_wave in [0, 5, 14, 20, 24] {
+            for perk in 0..12 {
+                let (full_off, full_on) =
+                    run_counterfactual_pair(&input, Params::default(), perk, activation_wave);
+                let (compact_off, compact_on) = run_counterfactual_summary_pair(
+                    &input,
+                    Params::default(),
+                    perk,
+                    activation_wave,
+                );
+                for (full, compact) in [(full_off, compact_off), (full_on, compact_on)] {
+                    assert_eq!(compact.wave, full.run.result.wave);
+                    assert_eq!(compact.lives, full.run.result.lives);
+                    assert_eq!(compact.gold, full.run.result.gold);
+                    assert_eq!(compact.seconds, full.run.result.seconds);
+                    assert_eq!(
+                        serde_json::to_vec(&compact.telemetry).unwrap(),
+                        serde_json::to_vec(&full.telemetry).unwrap()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn policy_checkpoints_match_replayed_prefixes() {
+        for map in 0..3 {
+            let mut rng = Xoshiro::new(8_000 + map as u64);
+            let genome = Genome::random(&mut rng);
+            for activation_wave in [0, 10, 14, 20, 24] {
+                let seed = 208_000 + map as u64 * 100 + activation_wave as u64;
+                let (policy, checkpoint) = run_policy_with_checkpoint(
+                    &genome,
+                    seed,
+                    map,
+                    25,
+                    Params::default(),
+                    activation_wave,
+                );
+                let mut actions = policy.actions;
+                let mut baseline_reusable = true;
+                if activation_wave == 14
+                    && let Some(target) = actions
+                        .iter()
+                        .find(|action| action.op == "place" && action.wave <= activation_wave)
+                        .cloned()
+                {
+                    actions.push(Action {
+                        wave: activation_wave,
+                        tick: None,
+                        op: "sell".into(),
+                        tower: 0,
+                        x: target.x,
+                        y: target.y,
+                        branch: 0,
+                        with: None,
+                    });
+                    baseline_reusable = false;
+                }
+                let input = Input {
+                    seed,
+                    map,
+                    max_wave: 25,
+                    actions,
+                    params: None,
+                    initial: None,
+                    endless: false,
+                };
+                for perk in 0..12 {
+                    let expected = run_counterfactual_summary_pair(
+                        &input,
+                        Params::default(),
+                        perk,
+                        activation_wave,
+                    );
+                    let actual = run_counterfactual_summary_pair_from_checkpoint(
+                        &input,
+                        &checkpoint,
+                        perk,
+                        activation_wave,
+                        baseline_reusable,
+                    );
+                    assert_eq!(
+                        serde_json::to_vec(&actual).unwrap(),
+                        serde_json::to_vec(&expected).unwrap(),
+                        "checkpoint mismatch map={map} perk={perk} activation={activation_wave}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
