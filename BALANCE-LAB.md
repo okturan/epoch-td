@@ -1,4 +1,4 @@
-# EPOCH Balance Lab — design brief
+# EPOCH Balance Lab — design and implementation brief
 
 A design for turning balance from hand-tuning into search: a deterministic core,
 a parameterized player, and coupled searches that evolve players to break the

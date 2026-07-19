@@ -94,11 +94,37 @@ npm test
 
 Both harnesses return a failing exit status when any declared balance or browser-interaction check fails. The pinned GitHub Actions workflow runs that same contract on every pull request and default-branch change.
 
+### Rust Balance Lab
+
+The repository contains a deterministic Rust twin of the simulation under
+`balance-lab/`. The browser game and JavaScript oracle remain the source of
+truth.
+
+The lab runs deterministic cases, cross-checks Rust traces against a generated
+2,000-case JavaScript oracle corpus, searches parameterized player strategies
+with MAP-Elites and per-niche diagonal CMA-ES, and searches game parameters with
+a gated minimax defender. It also exports browser replays, fits optional priors
+from local playtraces, validates parameter patches, benchmarks the core, and
+renders static attacker/defender dashboards.
+
+```sh
+npm run lab:oracle-full
+npm run lab:policy-golden
+npm run lab:search-gates
+npm run lab:defender-gates
+```
+
+CI uses a pinned Rust 1.96.1 toolchain and runs formatting, unit, oracle, policy,
+browser, attacker, and defender gates. Generated Cargo output and local reports
+stay under ignored `balance-lab/target/` and `balance-lab/out/`; see
+`balance-lab/README.md` for the full workflow and measured limitations.
+
 ## Files
 
 - `index.html` — the game. The only file you need to play.
 - `DESIGN.md` — the full spec: every tower stat, wave formula, doctrine, and fusion recipe.
-- `BALANCE-LAB.md` — design brief for a future Rust-based auto-balancing lab (mass simulation + evolutionary search). Not built; a plan for another agent.
+- `BALANCE-LAB.md` — auto-balancing design and implementation brief.
+- `balance-lab/` — deterministic Rust core, oracle and policy cross-checks, coupled searches, calibration, replay, patch, benchmark, and dashboard tooling.
 - `sim.js`, `endless.js` — the headless balance harness. Node, no dependencies.
 - `analysis.js` — isolation-arena tool that measures every tower, branch, and fusion's effective DPS per cell and per gold, with a guard that fails if a fusion becomes a runaway or a trap. Node, no dependencies.
 - `qa.js`, `audit.js`, `screenshot.js` — browser tests, a UI text audit (scans every card, overlay, and preview for placeholder text), and screenshots. These need Playwright (`npm install`).
