@@ -11,7 +11,8 @@ const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const core = html.split('<script>')[1].split('// ---- browser ----')[0];
 const boot = new Function(core + `;return {
   mkState, update, startWave, place, upgrade, sell, towerAt, branch, merge,
-  secretMerge, secretPair, pickRelic, power, setMap, TOWERS, WAVES, C
+  secretMerge, secretPair, pickRelic, power, setMap, TOWERS, WAVES, C,
+  B, PWS, SECRETS
 }`);
 
 function patchObject(target, patch) {
@@ -40,8 +41,23 @@ function applyAction(G, S, action) {
     return recipe != null && G.secretMerge(S, tower, mate, recipe);
   }
   if (op === 'sell') { if (!tower) return false; G.sell(S, tower); return true; }
-  if (op === 'power') return G.power(S, action.power, x || 0, y || 0);
+  if (op === 'power') return G.power(S, action.power == null ? action.tower : action.power, x || 0, y || 0);
+  if (op === 'relic') {
+    if (!S.pick) return false;
+    const choice = S.pick.indexOf(action.tower);
+    if (choice < 0) return false;
+    G.pickRelic(S, choice); return true;
+  }
+  if (op === 'early') { const wave = S.wave; G.startWave(S); return S.wave === wave + 1; }
   throw new Error(`unknown action op: ${op}`);
+}
+
+function applyMatching(G, S, pending, rejected, due) {
+  for (let i = 0; i < pending.length;) {
+    if (!due(pending[i])) { i++; continue; }
+    const action = pending.splice(i, 1)[0];
+    if (!applyAction(G, S, action)) rejected.push({ ...action, reason: 'illegal-or-unaffordable' });
+  }
 }
 
 function snapshot(S, waveSeconds) {
@@ -69,29 +85,42 @@ function run(input) {
     for (const [i, towerPatch] of Object.entries(input.params.towers))
       patchObject(G.TOWERS[Number(i)], towerPatch);
   }
+  patchObject(G.B, input.params && input.params.rules);
+  if (input.params && input.params.fusions) {
+    for (const [i, fusionPatch] of Object.entries(input.params.fusions))
+      patchObject(G.SECRETS[Number(i)], fusionPatch);
+  }
+  for (let i = 0; i < G.PWS.length; i++) {
+    G.PWS[i].cd = G.B.power_cooldowns[i];
+    G.PWS[i].age = G.B.power_ages[i];
+  }
   // Formula changes invalidate the eager first 50 rows.
   if (input.params && input.params.constants)
     for (let i = 0; i < G.WAVES.length; i++) G.WAVES[i] = undefined;
 
   const S = G.mkState();
+  if (input.endless) S.endless = 1;
   if (input.initial) patchObject(S, input.initial);
   const actions = (input.actions || []).map((a, order) => ({ ...a, order }))
-    .sort((a, b) => (a.wave || 0) - (b.wave || 0) || a.order - b.order);
+    .sort((a, b) => (a.wave || 0) - (b.wave || 0) || (a.tick || 0) - (b.tick || 0) || a.order - b.order);
   const pending = actions.slice(), rejected = [], trace = [];
   const maxWave = input.maxWave == null ? 50 : input.maxWave;
   const tickLimit = input.tickLimit || 3000000;
   let ticks = 0;
 
   while (!S.over && S.wave < maxWave && ticks < tickLimit) {
+    const clearWave = S.wave;
+    applyMatching(G, S, pending, rejected, a => (a.wave || 0) <= clearWave && a.tick == null && a.op === 'relic');
     if (S.pick) G.pickRelic(S, Math.abs(Number(input.seed || 0) + S.wave) % S.pick.length);
-    while (pending.length && (pending[0].wave || 0) <= S.wave) {
-      const a = pending.shift();
-      if (!applyAction(G, S, a)) rejected.push({ ...a, reason: 'illegal-or-unaffordable' });
-    }
+    applyMatching(G, S, pending, rejected, a => (a.wave || 0) <= clearWave && a.tick == null && a.op !== 'relic');
     if (S.phase !== 'wave') G.startWave(S);
     const started = S.t;
+    let waveTick = 0;
     while (S.phase === 'wave' && !S.over && ticks < tickLimit) {
+      const currentWave = S.wave;
+      applyMatching(G, S, pending, rejected, a => (a.wave || 0) <= currentWave && a.tick != null && a.tick <= waveTick);
       G.update(S, 1 / 30); S.ev.length = 0; ticks++;
+      waveTick++;
     }
     trace.push(snapshot(S, S.t - started));
   }

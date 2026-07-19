@@ -35,25 +35,25 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Check JavaScript syntax
-        run: node --check sim.js && node --check qa.js && node --check endless.js && node --check screenshot.js
-
-      - name: Verify balance and browser behavior
-        run: npm test
-
       - name: Set up pinned Rust toolchain
         run: |
           rustup toolchain install 1.96.1 --profile minimal --component rustfmt
           rustup override set 1.96.1
 
+      - name: Check JavaScript syntax
+        run: node --check sim.js && node --check qa.js && node --check endless.js && node --check screenshot.js && node --check oracle.js && node --check balance-lab/golden/generate.js && node --check balance-lab/apply-params.js && node --check balance-lab/check-report.js && node --check balance-lab/check-defender.js && node --check balance-lab/capture-playtraces.js && node --check balance-lab/inspect-dashboard.js
+
       - name: Check Rust balance lab formatting
         run: cargo fmt --manifest-path balance-lab/Cargo.toml --all -- --check
 
-      - name: Test Rust balance lab
-        run: cargo test --manifest-path balance-lab/Cargo.toml --locked
+      - name: Check Rust balance core and full oracle contract
+        run: cargo test --manifest-path balance-lab/Cargo.toml --locked && npm run lab:oracle-full && npm run lab:policy-golden
 
-      - name: Cross-check Rust core against JavaScript oracle
-        run: cargo run --manifest-path balance-lab/Cargo.toml --locked -- golden balance-lab/golden/cases.json
+      - name: Verify balance and browser behavior
+        run: npm test
+
+      - name: Verify distributional search gates
+        run: npm run lab:search-gates && npm run lab:defender-gates
 
       - name: Reject tracked-output drift
         run: git diff --exit-code

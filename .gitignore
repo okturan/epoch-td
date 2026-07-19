@@ -1,4 +1,5 @@
 node_modules/
 .DS_Store
 shots/
-balance-lab/target/
+/balance-lab/target/
+/balance-lab/out/

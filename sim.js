@@ -1,6 +1,9 @@
 const fs=require('fs');
 const src=fs.readFileSync(__dirname+'/index.html','utf8').split('<script>')[1].split('// ---- browser ----')[0];
-const boot=new Function(src+';return {mkState,update,startWave,place,upgrade,sell,towerAt,branch,merge,setMap,onPath,pickRelic,PATH:()=>PATH,WAVES,TOWERS,C}');
+const rawBoot=new Function(src+';return {mkState,update,startWave,place,upgrade,sell,towerAt,branch,merge,setMap,onPath,pickRelic,PATH:()=>PATH,WAVES,TOWERS,C,B,PWS,SECRETS}');
+const PARAMS=process.env.EPOCH_PARAMS?JSON.parse(fs.readFileSync(process.env.EPOCH_PARAMS,'utf8')):null;
+function patchObject(target,patch){if(!patch)return;for(const[k,v]of Object.entries(patch)){if(v&&typeof v==='object'&&!Array.isArray(v)){if(!target[k]||typeof target[k]!=='object')target[k]={};patchObject(target[k],v)}else target[k]=v}}
+function boot(){const G=rawBoot();patchObject(G.C,PARAMS&&PARAMS.constants);if(PARAMS&&PARAMS.towers)for(const[i,p]of Object.entries(PARAMS.towers))patchObject(G.TOWERS[Number(i)],p);patchObject(G.B,PARAMS&&PARAMS.rules);if(PARAMS&&PARAMS.fusions)for(const[i,p]of Object.entries(PARAMS.fusions))patchObject(G.SECRETS[Number(i)],p);for(let i=0;i<G.PWS.length;i++){G.PWS[i].cd=G.B.power_cooldowns[i];G.PWS[i].age=G.B.power_ages[i]}if(PARAMS&&PARAMS.constants)for(let i=0;i<G.WAVES.length;i++)G.WAVES[i]=undefined;return G}
 
 const INTENDED=[
 [0,0,4,2],[0,0,8,2],[1,0,6,2],[2,0,10,2],[3,0,6,4],[4,'u',4,2],[4,'u',8,2],

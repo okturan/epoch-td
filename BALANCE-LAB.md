@@ -1,32 +1,10 @@
 # EPOCH Balance Lab — design and implementation brief
 
-The original proposal for turning balance from hand-tuning into search: a fast
-deterministic core, a realistic parameterized player, and two coupled optimizers
-that evolve players to break the game and evolve the game to resist. A prototype
-now accompanies the brief; the status below separates what exists from the
-longer roadmap.
-
-## Current prototype status
-
-Implemented:
-
-- A deterministic Rust core and batch CLI under `balance-lab/`.
-- `run`, `golden`, `attack`, `dashboard`, and `bench` command surfaces.
-- A JavaScript-oracle cross-check that currently covers 3 cases and 11 wave
-  traces.
-- A Rayon-based attacker prototype and checked static report output.
-- CI compilation, formatting, and golden-contract verification on pinned Rust
-  1.96.1.
-
-Not yet complete:
-
-- The proposed few-thousand-case golden corpus.
-- Human-play calibration, the defender/parameter-optimization loop, and
-  distributional balance gates.
-- Cluster/GPU orchestration or a production browser replay path.
-
-The prototype proves the architecture can run and cross-check; it does not yet
-prove the full minimax system described below.
+A design for turning balance from hand-tuning into search: a deterministic core,
+a parameterized player, and coupled searches that evolve players to break the
+game and game constants to resist them. The working implementation and commands
+are in [`balance-lab/README.md`](balance-lab/README.md). That README also records
+the measured performance and the parts of this design that remain stretch work.
 
 ## Why
 

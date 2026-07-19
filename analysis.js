@@ -6,7 +6,10 @@
 //   node analysis.js fusions  fusion dominance + irradiate synergy only
 const fs=require('fs');
 const src=fs.readFileSync(__dirname+'/index.html','utf8').split('<script>')[1].split('// ---- browser ----')[0];
-const boot=new Function(src+';return {mkState,update,place,upgrade,branch,merge,secretMerge,towerAt,mkEnemy,setMap,TOWERS,SECRETS,C}');
+const rawBoot=new Function(src+';return {mkState,update,place,upgrade,branch,merge,secretMerge,towerAt,mkEnemy,setMap,TOWERS,SECRETS,C,B,PWS}');
+const PARAMS=process.env.EPOCH_PARAMS?JSON.parse(fs.readFileSync(process.env.EPOCH_PARAMS,'utf8')):null;
+function patchObject(target,patch){if(!patch)return;for(const[k,v]of Object.entries(patch)){if(v&&typeof v==='object'&&!Array.isArray(v)){if(!target[k]||typeof target[k]!=='object')target[k]={};patchObject(target[k],v)}else target[k]=v}}
+function boot(){const G=rawBoot();patchObject(G.C,PARAMS&&PARAMS.constants);if(PARAMS&&PARAMS.towers)for(const[i,p]of Object.entries(PARAMS.towers))patchObject(G.TOWERS[Number(i)],p);patchObject(G.B,PARAMS&&PARAMS.rules);if(PARAMS&&PARAMS.fusions)for(const[i,p]of Object.entries(PARAMS.fusions))patchObject(G.SECRETS[Number(i)],p);for(let i=0;i<G.PWS.length;i++){G.PWS[i].cd=G.B.power_cooldowns[i];G.PWS[i].age=G.B.power_ages[i]}return G}
 
 const T=20, DT=1/30;
 // A dummy that never moves and never dies, so a tower fires at it for the whole run.

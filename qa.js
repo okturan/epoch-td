@@ -19,6 +19,15 @@ const ok=(name,cond,extra)=>{if(!cond)failures++;console.log(name.padEnd(20)+': 
   ok('start screen',await pg.evaluate(()=>document.getElementById('mapsov').style.display!=='none'&&document.querySelectorAll('#maps button').length===3));
   await pg.click('#maps button:nth-child(1)');
   ok('map select',await pg.evaluate(()=>document.getElementById('mapsov').style.display==='none'&&PLEN===52));
+  const replay={seed:7,map:1,maxWave:2,actions:[{wave:0,op:'place',tower:0,x:4,y:2},{wave:1,op:'place',tower:0,x:8,y:2}]};
+  const rp=await br.newPage({viewport:{width:1060,height:900}});
+  await rp.goto('file://'+__dirname+'/index.html?replay='+encodeURIComponent(Buffer.from(JSON.stringify(replay)).toString('base64')));
+  await rp.waitForTimeout(50);
+  const waitsForClear=await rp.evaluate(()=>S.phase==='wave'&&labQueue.length===1);
+  await rp.evaluate(()=>{speed=100});
+  await rp.waitForFunction(()=>S.wave>=2,null,{timeout:5000});
+  ok('lab browser replay',waitsForClear&&await rp.evaluate(()=>S.towers.length===2&&MAP===1&&document.getElementById('mapsov').style.display==='none'));
+  await rp.close();
 
   await pg.locator('#hud').screenshot({path:__dirname+'/shots/60-hud-locked.png'});
   await pg.click('#shop button:nth-child(1)');
@@ -89,7 +98,7 @@ const ok=(name,cond,extra)=>{if(!cond)failures++;console.log(name.padEnd(20)+': 
   const g2=await pg.evaluate(()=>Math.floor(S.gold));
   await pg.click('#start');
   ok('early call',await pg.evaluate(g2=>S.wave===2&&Math.floor(S.gold)>g2,g2));
-  await pg.evaluate(()=>{S.gold=100;place(S,0,8,2);S.gold=3;selE=null;selT=towerAt(S,8,2);syncPanel()});
+  await pg.evaluate(()=>{setMap(0);S=mkState();S.gold=100;let t;for(let y=0;y<H&&!t;y++)for(let x=0;x<W&&!t;x++)if(place(S,0,x,y))t=towerAt(S,x,y);S.gold=3;selE=null;selT=t;syncPanel()});
   await pg.waitForTimeout(80);
   ok('poor = unclickable',await pg.evaluate(()=>document.querySelector('#panel button[data-c]').disabled));
   ok('card explains upgrade',(await pg.locator('#panel').textContent()).includes('+6%'));

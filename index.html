@@ -159,6 +159,7 @@ const AGES=[
 ['Information','#232336','#454578','#9090ff',134,207.7,'sawtooth'],
 ['Space','#131320','#39395d','#c870ff',140,220,'sawtooth']];
 const C={hp:14,g:1.12,cnt:.8,spd:.008,bty:.38};
+const B={upgrade_cost:.6,sell_refund:.7,doctrine_upgrade_cost:.5,doctrine_sell_refund:.85,doctrine_bounty:1,doctrine_range:1.08,doctrine_cooldown:.7,doctrine_knockback:1.5,doctrine_boss_knockback:.3,doctrine_lives:3,doctrine_projectile_speed:1.3,doctrine_splash:1.2,doctrine_irradiate:1,doctrine_slow:.5,burn_cap:5,doctrine_burn_cap:7,power_cooldowns:[45,30,40],power_ages:[1,4,7],meteor_damage:3,meteor_radius:1.5,stasis_duration:2.5,stasis_factor:.15,overdrive_duration:8,overdrive_multiplier:1.5};
 function waveRow(w){
   const k=Math.ceil(w/5),p=(w-1)%5,boss=p===4&&k%2===0,rush=p===4&&k%2===1;
   const A=ARCH[(p===1?Math.max(0,k-2):k-1)%10];
@@ -181,7 +182,7 @@ const towerAt=(S,x,y)=>S.towers.find(t=>t.x===x&&t.y===y);
 const inR=(t,e,rg)=>(e.x-t.x-.5)**2+(e.y-t.y-.5)**2<=rg*rg;
 const age=S=>Math.min(9,Math.floor((S.wave-(S.phase==='wave'?1:0))/5));
 const ev=(S,t,a,b,c)=>{S.ev.push({t,a,b,c})};
-function mkState(){return{gold:80,lives:20,wave:0,pw:[0,0,0],od:0,phase:'clear',autoT:1e9,spawns:[],endless:0,t:0,enemies:[],towers:[],projs:[],ev:[],ty:{},rl:{},pick:null,kills:0,bossK:0,goldE:0,over:0,won:0,dn:0}}
+function mkState(){return{gold:80,lives:20,wave:0,pw:[0,0,0],od:0,phase:'clear',autoT:1e9,spawns:[],endless:0,t:0,wst:0,enemies:[],towers:[],projs:[],ev:[],ty:{},rl:{},pick:null,kills:0,bossK:0,goldE:0,over:0,won:0,dn:0}}
 function mkEnemy(R,d,f){
   const hp=Math.round(R.hp*(f||1)),[x,y]=posAt(d||0);
   return{row:R,d:d||0,x,y,hp,max:hp,spd:R.spd,ar:R.ar,rg:R.rg,cap:R.cap,dash:R.dash,dc:2.5,inc:0,split:f?0:R.split,bty:f?1:R.bty,leak:R.leak,boss:R.boss,burnN:0,burnT:0,burnP:1,hitT:0,irr:0,slow:0,slowF:.6,leaked:0};
@@ -192,7 +193,7 @@ function startWave(S){
   const early=S.phase==='wave'?Math.round(2+S.wave*.5):0;
   S.gold+=early;S.goldE+=early;
   const R=getRow(S.wave);
-  S.spawns.push({R,sn:0,st:0});S.phase='wave';S.wave++;
+  S.spawns.push({R,sn:0,st:0});S.phase='wave';S.wave++;S.wst=S.t;
   ev(S,'wv',S.wave);
   if(early)ev(S,'call',early);
   if(R.boss)ev(S,'boss');
@@ -211,7 +212,7 @@ function calcBuffs(S){
     if((t.fire&&!f0)||(t.rad&&!r0))ev(S,'inf',t.x,t.y);
   }
 }
-const PWS=[{n:'Meteor',cd:45,age:1},{n:'Stasis',cd:30,age:4},{n:'Overdrive',cd:40,age:7}];
+const PWS=[{n:'Meteor',cd:B.power_cooldowns[0],age:B.power_ages[0]},{n:'Stasis',cd:B.power_cooldowns[1],age:B.power_ages[1]},{n:'Overdrive',cd:B.power_cooldowns[2],age:B.power_ages[2]}];
 const RELICS=[
 {n:'Napalm Doctrine',d:'Burn stacks to 7 (was 5)',k:'burn7',i:'bu'},
 {n:'Bounty Reform',d:'+1 gold on every kill',k:'bounty1',i:'g'},
@@ -250,15 +251,15 @@ function secretMerge(S,t,p,ri){
 function pickRelic(S,i){
   const r=RELICS[S.pick[i]];
   S.rl[r.k]=1;
-  if(r.k==='life3')S.lives+=3;
+  if(r.k==='life3')S.lives+=B.doctrine_lives;
   S.pick=null;S.autoT=3;ev(S,'relic',S.pick);
 }
 function power(S,i,x,y){
   if(S.pw[i]>0||age(S)<PWS[i].age)return false;
-  S.pw[i]=PWS[i].cd*(S.rl.cd07?.7:1);
-  if(i===0){const dm=3*C.hp*Math.pow(C.g,S.wave);for(const e of S.enemies)if((e.x-x)**2+(e.y-y)**2<=2.25)raw(S,e,dm,'pw');ev(S,'met',x,y)}
-  if(i===1){for(const e of S.enemies){e.slow=2.5;e.slowF=.15}ev(S,'sta')}
-  if(i===2){S.od=8;ev(S,'odr')}
+  S.pw[i]=PWS[i].cd*(S.rl.cd07?B.doctrine_cooldown:1);
+  if(i===0){const dm=B.meteor_damage*C.hp*Math.pow(C.g,S.wave);for(const e of S.enemies)if((e.x-x)**2+(e.y-y)**2<=B.meteor_radius**2)raw(S,e,dm,'pw');ev(S,'met',x,y)}
+  if(i===1){for(const e of S.enemies){e.slow=B.stasis_duration;e.slowF=B.stasis_factor}ev(S,'sta')}
+  if(i===2){S.od=B.overdrive_duration;ev(S,'odr')}
   return true;
 }
 function place(S,i,x,y){
@@ -267,12 +268,12 @@ function place(S,i,x,y){
   S.gold-=T.c;S.towers.push({i,x,y,lvl:0,br:0,inv:T.c,cd:0,heat:0,lock:null,a:0,buff:1});calcBuffs(S);return true;
 }
 function upgrade(S,t){
-  const c=Math.round(TOWERS[t.i].c*(S.rl.up50?.5:.6));
+  const c=Math.round(TOWERS[t.i].c*(S.rl.up50?B.doctrine_upgrade_cost:B.upgrade_cost));
   if(t.lvl>=3||S.gold<c)return false;
   S.gold-=c;t.lvl++;t.inv+=c;calcBuffs(S);return true;
 }
 function sell(S,t){
-  S.gold+=Math.round(t.inv*(S.rl.sell85?.85:.7));S.towers.splice(S.towers.indexOf(t),1);calcBuffs(S);
+  S.gold+=Math.round(t.inv*(S.rl.sell85?B.doctrine_sell_refund:B.sell_refund));S.towers.splice(S.towers.indexOf(t),1);calcBuffs(S);
 }
 function branch(S,t,b){
   const c=TOWERS[t.i].c;
@@ -311,25 +312,25 @@ function update(S,dt){
   for(const j of S.spawns)if((j.st-=dt)<=0&&j.sn<j.R.n){S.enemies.push(mkEnemy(j.R));j.sn++;j.st+=j.R.rush?.28:.8}
   S.spawns=S.spawns.filter(j=>j.sn<j.R.n);
   for(const t of S.towers){
-    const T=TOWERS[t.i],B=t.sec!=null?SECRETS[t.sec].f:(T['b'+t.br]||{}),m=Math.pow(1.5,t.lvl)*(B.dm||1)*(t.mb||1),rg=T.rg*(B.rgm||1)*(1+.06*t.lvl)*(S.rl.rng8?1.08:1);
-    if(T.field){for(const e of S.enemies)if(inR(t,e,rg)&&e.slow<.2){e.slow=.15;e.slowF=B.sf||(S.rl.slow5?.5:.6)}continue}
-    if(T.aura){for(const e of S.enemies)if(inR(t,e,rg)){raw(S,e,T.d*m*dt*(e.irr>0?1.2:1)*(S.od>0?1.5:1),7,t);e.irr=S.rl.irr1?1:.5}continue}
+    const T=TOWERS[t.i],M=t.sec!=null?SECRETS[t.sec].f:(T['b'+t.br]||{}),m=Math.pow(1.5,t.lvl)*(M.dm||1)*(t.mb||1),rg=T.rg*(M.rgm||1)*(1+.06*t.lvl)*(S.rl.rng8?B.doctrine_range:1);
+    if(T.field){for(const e of S.enemies)if(inR(t,e,rg)&&e.slow<.2){e.slow=.15;e.slowF=M.sf||(S.rl.slow5?B.doctrine_slow:.6)}continue}
+    if(T.aura){for(const e of S.enemies)if(inR(t,e,rg)){raw(S,e,T.d*m*dt*(e.irr>0?1.2:1)*(S.od>0?B.overdrive_multiplier:1),7,t);e.irr=S.rl.irr1?B.doctrine_irradiate:.5}continue}
     if(T.beam){
       let L=t.lock;
       if(!L||L.hp<=0||L.leaked){L=null;for(const e of S.enemies)if(!L||e.max>L.max)L=e;t.lock=L;t.heat=0}
-      if(L){t.heat+=dt*(B.hr||1);raw(S,L,T.d*(1+t.heat)*m*dt*(L.irr>0?1.2:1)*(S.od>0?1.5:1),9,t);if(B.ir)L.irr=S.rl.irr1?1:.5;t.a=Math.atan2(L.y-t.y-.5,L.x-t.x-.5)}
+      if(L){t.heat+=dt*(M.hr||1);raw(S,L,T.d*(1+t.heat)*m*dt*(L.irr>0?1.2:1)*(S.od>0?B.overdrive_multiplier:1),9,t);if(M.ir)L.irr=S.rl.irr1?B.doctrine_irradiate:.5;t.a=Math.atan2(L.y-t.y-.5,L.x-t.x-.5)}
       continue;
     }
-    t.cd-=dt*t.buff*(S.od>0?1.5:1);
+    t.cd-=dt*t.buff*(S.od>0?B.overdrive_multiplier:1);
     let tg=null;
-    if(T.home){for(const e of S.enemies)if(inR(t,e,rg)&&e.hp>e.inc&&(!tg||e.hp-e.inc>tg.hp-tg.inc))tg=e}
+    if(T.home){for(const e of S.enemies)if(inR(t,e,rg)&&e.hp>e.inc&&(!tg||e.hp-e.inc>tg.hp-tg.inc+1e-9))tg=e}
     else for(const e of S.enemies)if(inR(t,e,rg)&&(!tg||e.d>tg.d))tg=e;
-    if(T.ramp){if(t.lock!==tg){t.lock=tg;t.heat=0}else if(tg)t.heat=Math.min(B.hc||6,t.heat+dt)}
+    if(T.ramp){if(t.lock!==tg){t.lock=tg;t.heat=0}else if(tg)t.heat=Math.min(M.hc||6,t.heat+dt)}
     if(!tg){if(t.cd<0)t.cd=0;continue}
     t.a=Math.atan2(tg.y-t.y-.5,tg.x-t.x-.5);
     if(t.cd<=0){
       t.cd+=1/(T.ramp?T.r+t.heat:T.r);
-      S.projs.push({x:t.x+.5,y:t.y+.5,tg,v:(T.home?5:12)*(1+.1*t.lvl)*(B.pv||1)*(S.rl.pv13?1.3:1),d:T.d*m,sp:B.sp||T.sp||0,kb:B.kb||T.kb||0,pi:B.pi||T.pi||0,bu:(T.bu||B.bu)?m*(B.bum||1):t.fire?1:0,ir:t.rad||B.ir||0,sl:B.sl||0,i:t.i,tw:t});if(T.home)tg.inc+=T.d*m;
+      S.projs.push({x:t.x+.5,y:t.y+.5,tg,v:(T.home?5:12)*(1+.1*t.lvl)*(M.pv||1)*(S.rl.pv13?B.doctrine_projectile_speed:1),d:T.d*m,sp:M.sp||T.sp||0,kb:M.kb||T.kb||0,pi:M.pi||T.pi||0,bu:(T.bu||M.bu)?m*(M.bum||1):t.fire?1:0,ir:t.rad||M.ir||0,sl:M.sl||0,i:t.i,tw:t});if(T.home)tg.inc+=T.d*m;
       ev(S,'shoot',t.i);
     }
   }
@@ -337,11 +338,11 @@ function update(S,dt){
   for(const p of S.projs){
     const tx=p.tg.x,ty=p.tg.y,dx=tx-p.x,dy=ty-p.y,L=Math.hypot(dx,dy),st=p.v*dt;
     if(L<=st){
-      if(p.sp){const sr=p.sp*(S.rl.sp12?1.2:1);for(const e of S.enemies)if((e.x-tx)**2+(e.y-ty)**2<=sr*sr)dmg(S,e,p.d,p.pi,p.i,1,p.tw);p.tg.inc-=p.d}
+      if(p.sp){const sr=p.sp*(S.rl.sp12?B.doctrine_splash:1);for(const e of S.enemies)if((e.x-tx)**2+(e.y-ty)**2<=sr*sr)dmg(S,e,p.d,p.pi,p.i,1,p.tw);p.tg.inc-=p.d}
       else if(p.tg.hp>0&&!p.tg.leaked)dmg(S,p.tg,p.d,p.pi,p.i,0,p.tw);
-      if(p.kb&&p.tg.hp>0)p.tg.d=Math.max(0,p.tg.d-p.kb*(S.rl.kb15?1.5:1)*(p.tg.boss?(S.rl.kb15?.3:.15):1));
-      if(p.bu&&p.tg.hp>0){p.tg.burnT=3;p.tg.burnN=Math.min(S.rl.burn7?7:5,p.tg.burnN+1);p.tg.burnP=Math.max(p.tg.burnP,p.bu)}
-      if(p.ir&&p.tg.hp>0)p.tg.irr=S.rl.irr1?1:.5;
+      if(p.kb&&p.tg.hp>0)p.tg.d=Math.max(0,p.tg.d-p.kb*(S.rl.kb15?B.doctrine_knockback:1)*(p.tg.boss?(S.rl.kb15?B.doctrine_boss_knockback:.15):1));
+      if(p.bu&&p.tg.hp>0){p.tg.burnT=3;p.tg.burnN=Math.min(S.rl.burn7?B.doctrine_burn_cap:B.burn_cap,p.tg.burnN+1);p.tg.burnP=Math.max(p.tg.burnP,p.bu)}
+      if(p.ir&&p.tg.hp>0)p.tg.irr=S.rl.irr1?B.doctrine_irradiate:.5;
       if(p.sl&&p.tg.hp>0&&p.tg.slow<.2){p.tg.slow=.5;p.tg.slowF=.6}
       ev(S,'hit',tx,ty);
     }else{p.x+=dx/L*st;p.y+=dy/L*st;keep.push(p)}
@@ -361,7 +362,7 @@ function update(S,dt){
   for(const e of S.enemies){
     if(e.leaked)continue;
     if(e.hp<=0){
-      S.gold+=e.bty+(S.rl.bounty1?1:0);S.goldE+=e.bty+(S.rl.bounty1?1:0);S.kills++;if(e.boss)S.bossK++;ev(S,e.boss?'bossdie':'die',e.x,e.y);
+      S.gold+=e.bty+(S.rl.bounty1?B.doctrine_bounty:0);S.goldE+=e.bty+(S.rl.bounty1?B.doctrine_bounty:0);S.kills++;if(e.boss)S.bossK++;ev(S,e.boss?'bossdie':'die',e.x,e.y);
       if(e.split){born.push(mkEnemy(e.row,Math.max(0,e.d-.6),.4));born.push(mkEnemy(e.row,Math.max(0,e.d-1.2),.4))}
     }else next.push(e);
   }
@@ -381,6 +382,56 @@ function update(S,dt){
 // ---- browser ----
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 let S=mkState(),sel=-1,selT=null,selE=null,mx=-1,my=-1,fmx=0,fmy=0,speed=1,muted=0,floats=[],parts=[],flash=null,shake=0,fwT=0,fwN=0,paused=0,hlT=null,dragT=null,dragOn=0,dnX=0,dnY=0,justDrag=0;
+let labReplay=null,labQueue=[],labWaveTick=0;
+const humanTrace={schema:1,map:MAP,startedAt:new Date().toISOString(),actions:[]};
+const humanTick=state=>state.phase==='wave'?Math.max(0,Math.round((state.t-state.wst)*30)):null;
+const humanRecord=(state,action)=>{if(labReplay)return;const tick=humanTick(state);humanTrace.actions.push({...action,wave:state.wave,...(tick==null?{}:{tick})})};
+const basePlace=place;place=(state,i,x,y)=>{const ok=basePlace(state,i,x,y);if(ok)humanRecord(state,{op:'place',tower:i,x,y});return ok};
+const baseUpgrade=upgrade;upgrade=(state,t)=>{const ok=baseUpgrade(state,t);if(ok)humanRecord(state,{op:'upgrade',x:t.x,y:t.y});return ok};
+const baseBranch=branch;branch=(state,t,b)=>{const ok=baseBranch(state,t,b);if(ok)humanRecord(state,{op:'branch',branch:b,x:t.x,y:t.y});return ok};
+const baseMerge=merge;merge=(state,t,p)=>{p=p||mergeMate(state,t);const withPoint=p&&{x:p.x,y:p.y},ok=baseMerge(state,t,p);if(ok)humanRecord(state,{op:'merge',x:t.x,y:t.y,with:withPoint});return ok};
+const baseSecretMerge=secretMerge;secretMerge=(state,t,p,ri)=>{const withPoint={x:p.x,y:p.y},ok=baseSecretMerge(state,t,p,ri);if(ok)humanRecord(state,{op:'fuse',x:t.x,y:t.y,with:withPoint});return ok};
+const baseSell=sell;sell=(state,t)=>{humanRecord(state,{op:'sell',x:t.x,y:t.y});return baseSell(state,t)};
+const basePower=power;power=(state,i,x,y)=>{const ok=basePower(state,i,x,y);if(ok)humanRecord(state,{op:'power',tower:i,x:x||0,y:y||0});return ok};
+const basePickRelic=pickRelic;pickRelic=(state,i)=>{const relic=state.pick&&state.pick[i];basePickRelic(state,i);if(relic!=null)humanRecord(state,{op:'relic',tower:relic})};
+const baseStartWave=startWave;startWave=state=>{const wasWave=state.phase==='wave',tick=humanTick(state),wave=state.wave;baseStartWave(state);if(!labReplay&&wasWave&&state.wave===wave+1)humanTrace.actions.push({op:'early',wave,tick})};
+window.exportEpochPlaytrace=()=>JSON.stringify({...humanTrace,map:MAP,durationSeconds:S.t,result:{wave:S.wave,lives:S.lives,won:!!S.won}},null,2);
+try{
+  const encoded=new URLSearchParams(location.search).get('replay');
+  if(encoded){labReplay=JSON.parse(decodeURIComponent(escape(atob(encoded))));labQueue=(labReplay.actions||[]).map((a,order)=>({...a,order})).sort((a,b)=>a.wave-b.wave||(a.tick||0)-(b.tick||0)||a.order-b.order);setMap(labReplay.map||0);S=mkState();document.getElementById('mapsov').style.display='none'}
+}catch(error){console.error('Invalid Balance Lab replay',error);labReplay=null}
+function labApply(a){
+  const t=towerAt(S,a.x,a.y);
+  if(a.op==='place')return place(S,a.tower,a.x,a.y);
+  if(a.op==='upgrade')return!!t&&upgrade(S,t);
+  if(a.op==='branch')return!!t&&branch(S,t,a.branch);
+  if(a.op==='sell'){if(t){sell(S,t);return true}return false}
+  if(a.op==='merge'){const p=a.with&&towerAt(S,a.with.x,a.with.y);return!!t&&merge(S,t,p)}
+  if(a.op==='fuse'){const p=a.with&&towerAt(S,a.with.x,a.with.y),ri=t&&p&&secretPair(t,p);return ri!=null&&secretMerge(S,t,p,ri)}
+  if(a.op==='power')return power(S,a.tower,a.x||0,a.y||0);
+  if(a.op==='relic'){if(!S.pick)return false;const i=S.pick.indexOf(a.tower);if(i<0)return false;pickRelic(S,i);return true}
+  if(a.op==='early'){const w=S.wave;startWave(S);return S.wave===w+1}
+  return false;
+}
+function labTake(due){
+  for(let i=0;i<labQueue.length;){
+    if(!due(labQueue[i])){i++;continue}
+    const a=labQueue.splice(i,1)[0];
+    if(!labApply(a)){console.error('Balance Lab replay action failed',a);labReplay=null;return false}
+  }
+  return true;
+}
+function labReplayStep(){
+  if(!labReplay||S.over)return;
+  if(S.phase==='clear'){
+    const w=S.wave;
+    if(!labTake(a=>a.wave<=w&&a.tick==null&&a.op==='relic'))return;
+    if(S.pick)pickRelic(S,(Number(labReplay.seed||0)+S.wave)%S.pick.length);
+    if(!labTake(a=>a.wave<=w&&a.tick==null&&a.op!=='relic'))return;
+    if(S.wave<(labReplay.maxWave||50)){startWave(S);labWaveTick=0}
+  }
+  if(S.phase==='wave')labTake(a=>a.wave<=S.wave&&a.tick!=null&&a.tick<=labWaveTick);
+}
 const ECOL=['#c9825e','#e0b458','#9aa7b8','#7cb86a','#e08050','#8f8f96','#d4a53f','#b07858','#5fc9d8','#a878e8'];
 const ICONS={};
 function defIcon(n,f){const c=document.createElement('canvas');c.width=c.height=12;const g=c.getContext('2d');g.lineWidth=1.6;g.lineCap='round';g.lineJoin='round';f(g);ICONS[n]=c.toDataURL()}
@@ -453,7 +504,7 @@ function draw(){
   if(sel>=0&&mx>=0){const T=TOWERS[sel],ok=!onPath(mx,my)&&!towerAt(S,mx,my)&&S.gold>=T.c;
     ctx.fillStyle=ok?'#ffffff22':'#ff000033';ctx.fillRect(mx*CELL,my*CELL,CELL,CELL);
     ctx.strokeStyle=ok?'#ffffff66':'#ff444466';ctx.lineWidth=2;ctx.beginPath();ctx.arc((mx+.5)*CELL,(my+.5)*CELL,T.rg*CELL,0,7);ctx.stroke()}
-  if(selT){const _T=TOWERS[selT.i],_B=selT.sec!=null?SECRETS[selT.sec].f:(_T['b'+selT.br]||{}),_rg=_T.rg*(_B.rgm||1)*(1+.06*selT.lvl)*(S.rl.rng8?1.08:1);ctx.strokeStyle='#ffd87066';ctx.lineWidth=2.5+Math.sin(S.t*6);ctx.beginPath();ctx.arc((selT.x+.5)*CELL,(selT.y+.5)*CELL,_rg*CELL,0,7);ctx.stroke()}
+  if(selT){const _T=TOWERS[selT.i],_B=selT.sec!=null?SECRETS[selT.sec].f:(_T['b'+selT.br]||{}),_rg=_T.rg*(_B.rgm||1)*(1+.06*selT.lvl)*(S.rl.rng8?B.doctrine_range:1);ctx.strokeStyle='#ffd87066';ctx.lineWidth=2.5+Math.sin(S.t*6);ctx.beginPath();ctx.arc((selT.x+.5)*CELL,(selT.y+.5)*CELL,_rg*CELL,0,7);ctx.stroke()}
   for(const t of S.towers)drawTower(t);
   for(const t of S.towers)if(t.i===9&&t.lock&&t.lock.hp>0&&S.phase==='wave'){
     const x=(t.x+.5)*CELL,y=(t.y+.5)*CELL,ex=t.lock.x*CELL,ey=t.lock.y*CELL;
@@ -563,20 +614,20 @@ $('help').onclick=()=>{$('helpov').style.display=$('helpov').style.display==='fl
 $('helpov').onclick=()=>{$('helpov').style.display='none'};
 $('endgo').onclick=()=>{S.endless=1;S.over=0;S.won=0;S.phase='clear';S.autoT=3;endD.style.display='none'};
 function statCells(t){
-  const T=TOWERS[t.i],B=t.sec!=null?SECRETS[t.sec].f:(T['b'+t.br]||{}),m=Math.pow(1.5,t.lvl)*(B.dm||1)*(t.mb||1),rg=(T.rg*(B.rgm||1)*(1+.06*t.lvl)*(S.rl.rng8?1.08:1)).toFixed(1);
+  const T=TOWERS[t.i],M=t.sec!=null?SECRETS[t.sec].f:(T['b'+t.br]||{}),m=Math.pow(1.5,t.lvl)*(M.dm||1)*(t.mb||1),rg=(T.rg*(M.rgm||1)*(1+.06*t.lvl)*(S.rl.rng8?B.doctrine_range:1)).toFixed(1);
   const c=[],sc=(i,l,v)=>c.push('<span class=sc>'+ic(i)+'<small>'+l+'</small> <b>'+v+'</b></span>');
-  if(T.field){sc('sf','slow',Math.round(100-(B.sf||.6)*100)+'%');sc('bf','buff','+'+Math.round((t.br===1?.5:.25)*Math.pow(1.5,t.lvl)*100)+'% rate');sc('rng','range',rg)}
+  if(T.field){sc('sf','slow',Math.round(100-(M.sf||.6)*100)+'%');sc('bf','buff','+'+Math.round((t.br===1?.5:.25)*Math.pow(1.5,t.lvl)*100)+'% rate');sc('rng','range',rg)}
   else if(T.aura){sc('aura','aura',(T.d*m).toFixed(0)+'/s');sc('dmg','irradiate','×1.2');sc('rng','range',rg)}
-  else if(T.beam){sc('beam','beam',(T.d*m).toFixed(0)+'/s');sc('rate','ramp','+'+(T.d*m*(B.hr||1)).toFixed(0)+'/s²');sc('rng','range','∞')}
+  else if(T.beam){sc('beam','beam',(T.d*m).toFixed(0)+'/s');sc('rate','ramp','+'+(T.d*m*(M.hr||1)).toFixed(0)+'/s²');sc('rng','range','∞')}
   else{
     sc('dmg','dmg',(T.d*m).toFixed(0));
-    sc('rate','rate',(T.ramp?T.r+'→'+(T.r+(B.hc||6)):(T.r*(B.rm||1)*t.buff).toFixed(2))+'/s');
+    sc('rate','rate',(T.ramp?T.r+'→'+(T.r+(M.hc||6)):(T.r*(M.rm||1)*t.buff).toFixed(2))+'/s');
     sc('rng','range',rg);
-    sc('dps','dps',(T.ramp?T.d*m*(T.r+(B.hc||6)):T.d*m*T.r*(B.rm||1)*t.buff).toFixed(0));
-    if(B.sp||T.sp)sc('sp','splash',B.sp||T.sp);
-    if(B.pi||T.pi)sc('pi','pierce','yes');
-    if(T.bu||B.bu)sc('bu','burn',(4*m*(B.bum||1)).toFixed(0)+'×'+(S.rl.burn7?7:5)+'/s');
-    if(B.kb||T.kb)sc('kb','knock',B.kb||T.kb);
+    sc('dps','dps',(T.ramp?T.d*m*(T.r+(M.hc||6)):T.d*m*T.r*(M.rm||1)*t.buff).toFixed(0));
+    if(M.sp||T.sp)sc('sp','splash',M.sp||T.sp);
+    if(M.pi||T.pi)sc('pi','pierce','yes');
+    if(T.bu||M.bu)sc('bu','burn',(4*m*(M.bum||1)).toFixed(0)+'×'+(S.rl.burn7?B.doctrine_burn_cap:B.burn_cap)+'/s');
+    if(M.kb||T.kb)sc('kb','knock',M.kb||T.kb);
   }
   if(t.mb)c.push('<span class=sc>'+ic('dmg')+'<small>merged</small> <b>×'+t.mb.toFixed(2)+'</b></span>');
   if(t.fire)c.push('<span class=sc style="color:#ff8c1a">● fire ammo</span>');
@@ -609,11 +660,11 @@ function syncPanel(){
     return;
   }
   if(!selT){panel.innerHTML='<div class=mut><b>Nothing selected</b><br><small>Click a tower or enemy to inspect it.</small></div>'+footHTML();return}
-  const t=selT,T=TOWERS[t.i],B=t.sec!=null?SECRETS[t.sec].f:(T['b'+t.br]||{}),m=Math.pow(1.5,t.lvl)*(B.dm||1)*(t.mb||1);
+  const t=selT,T=TOWERS[t.i],M=t.sec!=null?SECRETS[t.sec].f:(T['b'+t.br]||{}),m=Math.pow(1.5,t.lvl)*(M.dm||1)*(t.mb||1);
   const hd=document.createElement('div');hd.id='phead';
   hd.appendChild(towerIcon(t.i,56));
   const id=document.createElement('div');id.id='pinfo';
-  id.innerHTML='<b>'+(t.sec!=null?'✦ '+SECRETS[t.sec].n:T.n)+'</b> <span class=mut>L'+t.lvl+'</span><br><small>'+(t.sec!=null?'<span style="color:#ffd870">'+SECRETS[t.sec].d+'</span>':t.br?'<span style="color:#ffd870">★'+B.n+'</span>':'<span class=mut>no specialization</span>')+'</small><br><small class=mut>invested '+t.inv+'g · dealt '+fmtN(t.dd||0)+'</small>';
+  id.innerHTML='<b>'+(t.sec!=null?'✦ '+SECRETS[t.sec].n:T.n)+'</b> <span class=mut>L'+t.lvl+'</span><br><small>'+(t.sec!=null?'<span style="color:#ffd870">'+SECRETS[t.sec].d+'</span>':t.br?'<span style="color:#ffd870">★'+M.n+'</span>':'<span class=mut>no specialization</span>')+'</small><br><small class=mut>invested '+t.inv+'g · dealt '+fmtN(t.dd||0)+'</small>';
   hd.appendChild(id);
   panel.appendChild(hd);
   const sg=document.createElement('div');sg.id='pstats';sg.innerHTML=statCells(t);panel.appendChild(sg);
@@ -626,7 +677,7 @@ function syncPanel(){
     b.onclick=()=>{fn();syncPanel()};sl.appendChild(b);return b};
   const sA=slot('sA');
   if(t.lvl<3){
-    const c=Math.round(T.c*(S.rl.up50?.5:.6));
+    const c=Math.round(T.c*(S.rl.up50?B.doctrine_upgrade_cost:B.upgrade_cost));
     const us=T.field?[ic('bf')+'buff power ×1.5',ic('rng')+'range +6%']:T.aura?[ic('aura')+(T.d*m).toFixed(0)+' → '+(T.d*m*1.5).toFixed(0)+'/s',ic('rng')+'range +6%']:T.beam?[ic('beam')+'beam & ramp ×1.5']:[ic('dmg')+(T.d*m).toFixed(0)+' → '+(T.d*m*1.5).toFixed(0)+' · '+ic('rng')+'+6%',ic('spd')+'proj speed +10%'];
     btn(sA,'Upgrade · '+c+'g',us,()=>{if(upgrade(S,t))sfx('up')},c);
   }else plaque(sA,'Upgrade',['maxed · L3'+(t.lvl>3?' — L'+t.lvl+' via merges':'')],1);
@@ -634,8 +685,8 @@ function syncPanel(){
   if(t.lvl>=3&&!t.br&&t.sec==null){
     btn(sB,'★'+T.b1.n,BFX(T.b1).concat('<span class=mut>'+T.c+'g · permanent</span>'),()=>{if(branch(S,t,1))sfx('br')},T.c);
     btn(sB,'★'+T.b2.n,BFX(T.b2).concat('<span class=mut>'+T.c+'g · permanent</span>'),()=>{if(branch(S,t,2))sfx('br')},T.c);
-  }else if(t.sec!=null)plaque(sB,'✦ '+SECRETS[t.sec].n,BFX(B));
-  else if(t.br)plaque(sB,'★'+B.n,BFX(B));
+  }else if(t.sec!=null)plaque(sB,'✦ '+SECRETS[t.sec].n,BFX(M));
+  else if(t.br)plaque(sB,'★'+M.n,BFX(M));
   else plaque(sB,'Specialize',['at L3 — choose one of','two permanent paths'],1);
   const sC=slot('sC');
   const sm=secretMate(S,t);
@@ -665,7 +716,7 @@ function syncPanel(){
   else plaque(sC,'Merge',['L5 — maximum level'],1);
   panel.insertAdjacentHTML('beforeend',footHTML());
   const sD=document.createElement('div');sD.className='slot sD';panel.appendChild(sD);
-  btn(sD,'Sell',['+'+Math.round(t.inv*(S.rl.sell85?.85:.7))+'g'],()=>{sell(S,t);selT=null;sfx('sell')}).className='sellb';
+  btn(sD,'Sell',['+'+Math.round(t.inv*(S.rl.sell85?B.doctrine_sell_refund:B.sell_refund))+'g'],()=>{sell(S,t);selT=null;sfx('sell')}).className='sellb';
 }
 cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();fmx=(e.clientX-r.left)/r.width*W;fmy=(e.clientY-r.top)/r.height*H;mx=Math.floor(fmx);my=Math.floor(fmy);
   if(dragT&&!dragOn&&(fmx-dnX)**2+(fmy-dnY)**2>.16)dragOn=1});
@@ -863,7 +914,9 @@ addEventListener('resize',fit);fit();setTimeout(fit,80);
 let last=performance.now(),acc=0;
 function frame(ts){
   const dt=Math.min(.1,(ts-last)/1000);last=ts;if(!paused)acc+=dt*speed;
-  while(acc>1/60){update(S,1/60);acc-=1/60}
+  labReplayStep();
+  const step=labReplay?1/30:1/60;
+  while(acc>step){update(S,step);acc-=step;if(labReplay){labWaveTick++;labReplayStep()}}
   if(S.over&&S.won){fwT-=dt;if(fwT<=0){fwT=.55;fwN++;boom(2+(fwN*3.7)%10,1.3+(fwN*2.3)%5,18,['#ffd870','#c870ff','#5fc9d8','#7fe06f'][fwN%4],4.5)}}
   drain();draw();hud();
   requestAnimationFrame(frame);
