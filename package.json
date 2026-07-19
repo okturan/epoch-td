@@ -15,6 +15,8 @@
     "lab:apply-params": "node balance-lab/apply-params.js",
     "lab:search-gates": "cargo run --release --quiet --manifest-path balance-lab/Cargo.toml -- attack 4 128 1 && node balance-lab/check-report.js",
     "lab:defender-gates": "cargo run --release --quiet --manifest-path balance-lab/Cargo.toml -- defend 1 4 4 7 && node balance-lab/check-defender.js",
+    "lab:sensitivity-smoke": "cargo run --release --quiet --manifest-path balance-lab/Cargo.toml -- sensitivity 12 1 4 20260719 25 && node balance-lab/check-sensitivity.js balance-lab/out/sensitivity-report.json 240",
+    "lab:sensitivity": "cargo run --release --quiet --manifest-path balance-lab/Cargo.toml -- sensitivity 100000 34 2048 20260719 25 && node balance-lab/check-sensitivity.js balance-lab/out/sensitivity-report.json 2000000",
     "lab:test": "cargo test --manifest-path balance-lab/Cargo.toml && npm run lab:golden",
     "audit": "node audit.js",
     "endless": "node endless.js",

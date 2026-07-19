@@ -1110,6 +1110,7 @@ struct Projectile {
     irr: bool,
     slow: bool,
     tower_slot: usize,
+    born_at: f64,
 }
 #[derive(Default)]
 struct ProjectileSoa {
@@ -1127,6 +1128,7 @@ struct ProjectileSoa {
     irr: Vec<bool>,
     slow: Vec<bool>,
     tower_slot: Vec<usize>,
+    born_at: Vec<f64>,
 }
 impl ProjectileSoa {
     fn with_capacity(n: usize) -> Self {
@@ -1134,7 +1136,7 @@ impl ProjectileSoa {
         macro_rules! r{($($f:ident),*)=>{$(s.$f.reserve(n);)*}}
         r!(
             x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
-            tower_slot
+            tower_slot, born_at
         );
         s
     }
@@ -1145,7 +1147,7 @@ impl ProjectileSoa {
         macro_rules! c{($($f:ident),*)=>{$(self.$f.clear();)*}}
         c!(
             x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
-            tower_slot
+            tower_slot, born_at
         );
     }
     fn push(&mut self, p: Projectile) {
@@ -1153,7 +1155,7 @@ impl ProjectileSoa {
         macro_rules! q{($($f:ident),*)=>{$(self.$f.push(p.$f);)*}}
         q!(
             x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
-            tower_slot
+            tower_slot, born_at
         );
     }
     fn get(&self, i: usize) -> Projectile {
@@ -1172,6 +1174,7 @@ impl ProjectileSoa {
             irr: self.irr[i],
             slow: self.slow[i],
             tower_slot: self.tower_slot[i],
+            born_at: self.born_at[i],
         }
     }
 }
@@ -1266,6 +1269,33 @@ pub struct RunResult {
     pub result: WaveTrace,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Telemetry {
+    pub leaks: u64,
+    pub leak_damage: i64,
+    pub effective_damage: f64,
+    pub overkill_damage: f64,
+    pub projectiles_fired: u64,
+    pub projectile_impacts: u64,
+    pub projectile_latency_seconds: f64,
+    pub wasted_projectiles: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PerkIntervention {
+    pub perk: usize,
+    pub enabled: bool,
+    pub activation_wave: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CounterfactualRun {
+    pub run: RunResult,
+    pub telemetry: Telemetry,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebugTick {
@@ -1300,10 +1330,12 @@ pub struct Sim {
     won: bool,
     next_enemy: u64,
     relics: [bool; 12],
+    perk_overrides: [Option<bool>; 12],
     pick: Vec<usize>,
     power_cooldowns: [f64; 3],
     overdrive: f64,
     endless: bool,
+    telemetry: Telemetry,
 }
 
 impl Sim {
@@ -1330,10 +1362,12 @@ impl Sim {
             won: false,
             next_enemy: 1,
             relics: [false; 12],
+            perk_overrides: [None; 12],
             pick: vec![],
             power_cooldowns: [0.; 3],
             overdrive: 0.,
             endless: false,
+            telemetry: Telemetry::default(),
         };
         s.set_map(map);
         s
@@ -1475,7 +1509,7 @@ impl Sim {
             "sell" => {
                 if let Some(i) = self.tower_at(a.x, a.y) {
                     self.gold += (self.towers[i].inv
-                        * if self.relics[4] {
+                        * if self.perk_active(4) {
                             self.params.rules.doctrine_sell_refund
                         } else {
                             self.params.rules.sell_refund
@@ -1569,7 +1603,7 @@ impl Sim {
     }
     fn upgrade(&mut self, i: usize) -> bool {
         let c = (self.params.towers[self.towers[i].i].cost
-            * if self.relics[5] {
+            * if self.perk_active(5) {
                 self.params.rules.doctrine_upgrade_cost
             } else {
                 self.params.rules.upgrade_cost
@@ -1663,7 +1697,7 @@ impl Sim {
             return false;
         }
         self.relics[relic] = true;
-        if relic == 7 {
+        if relic == 7 && self.perk_active(7) {
             self.lives += self.params.rules.doctrine_lives;
         }
         self.pick.clear();
@@ -1686,7 +1720,7 @@ impl Sim {
             return false;
         }
         self.power_cooldowns[power] = self.params.rules.power_cooldowns[power]
-            * if self.relics[2] {
+            * if self.perk_active(2) {
                 self.params.rules.doctrine_cooldown
             } else {
                 1.
@@ -1762,11 +1796,27 @@ impl Sim {
     }
     fn raw(&mut self, ei: usize, d: f64, tower: Option<usize>) {
         let eff = d.min(self.enemies.hp[ei].max(0.));
+        self.telemetry.effective_damage += eff;
+        self.telemetry.overkill_damage += (d - eff).max(0.);
         self.enemies.hp[ei] -= d;
         if let Some(t) = tower
             && t < self.towers.len()
         {
             self.towers[t].damage += eff
+        }
+    }
+    fn perk_active(&self, perk: usize) -> bool {
+        self.perk_overrides[perk].unwrap_or(self.relics[perk])
+    }
+    fn apply_perk_intervention(&mut self, intervention: PerkIntervention) {
+        if self.wave < intervention.activation_wave {
+            return;
+        }
+        let was_active = self.perk_active(intervention.perk);
+        self.perk_overrides[intervention.perk] = Some(intervention.enabled);
+        let is_active = self.perk_active(intervention.perk);
+        if intervention.perk == 7 && !was_active && is_active {
+            self.lives += self.params.rules.doctrine_lives;
         }
     }
     fn damage(&mut self, ei: usize, mut d: f64, pierce: bool, slow_bonus: bool, tower: usize) {
@@ -1820,7 +1870,7 @@ impl Sim {
             let range = spec.range
                 * b.rgm.unwrap_or(1.)
                 * (1. + 0.06 * self.towers[ti].level as f64)
-                * if self.relics[3] {
+                * if self.perk_active(3) {
                     self.params.rules.doctrine_range
                 } else {
                     1.
@@ -1831,7 +1881,7 @@ impl Sim {
                         && self.enemies.slow[ei] < 0.2
                     {
                         self.enemies.slow[ei] = 0.15;
-                        self.enemies.slow_f[ei] = b.sf.unwrap_or(if self.relics[11] {
+                        self.enemies.slow_f[ei] = b.sf.unwrap_or(if self.perk_active(11) {
                             self.params.rules.doctrine_slow
                         } else {
                             0.6
@@ -1853,7 +1903,7 @@ impl Sim {
                             }
                             * (if self.enemies.irr[ei] > 0. { 1.2 } else { 1. });
                         self.raw(ei, d, Some(ti));
-                        self.enemies.irr[ei] = if self.relics[10] {
+                        self.enemies.irr[ei] = if self.perk_active(10) {
                             self.params.rules.doctrine_irradiate
                         } else {
                             0.5
@@ -1891,7 +1941,7 @@ impl Sim {
                         * (if self.enemies.irr[ei] > 0. { 1.2 } else { 1. });
                     self.raw(ei, d, Some(ti));
                     if b.ir.is_some() {
-                        self.enemies.irr[ei] = if self.relics[10] {
+                        self.enemies.irr[ei] = if self.perk_active(10) {
                             self.params.rules.doctrine_irradiate
                         } else {
                             0.5
@@ -1958,7 +2008,7 @@ impl Sim {
                     v: (if spec.homing { 5. } else { 12. })
                         * (1. + 0.1 * self.towers[ti].level as f64)
                         * b.pv.unwrap_or(1.)
-                        * if self.relics[8] {
+                        * if self.perk_active(8) {
                             self.params.rules.doctrine_projectile_speed
                         } else {
                             1.
@@ -1977,7 +2027,9 @@ impl Sim {
                     irr: self.towers[ti].rad || b.ir.is_some(),
                     slow: b.sl.is_some(),
                     tower_slot: ti,
+                    born_at: self.t,
                 });
+                self.telemetry.projectiles_fired += 1;
                 if spec.homing {
                     self.enemies.inc[ei] += damage
                 }
@@ -2008,9 +2060,12 @@ impl Sim {
             };
             let step = p.v * dt;
             if len <= step {
+                self.telemetry.projectile_impacts += 1;
+                self.telemetry.projectile_latency_seconds += self.t - p.born_at;
+                let mut effective_targets = 0usize;
                 if p.splash > 0. {
                     let splash = p.splash
-                        * if self.relics[9] {
+                        * if self.perk_active(9) {
                             self.params.rules.doctrine_splash
                         } else {
                             1.
@@ -2026,6 +2081,9 @@ impl Sim {
                             <= splash * splash
                     }));
                     for &i in &hits {
+                        if self.enemies.hp[i] > 0. && !self.enemies.leaked[i] {
+                            effective_targets += 1;
+                        }
                         self.damage(i, p.damage, p.pierce, true, p.tower_slot)
                     }
                     self.hit_scratch = hits;
@@ -2035,19 +2093,23 @@ impl Sim {
                 } else if let Some(ei) =
                     target_index.filter(|&i| self.enemies.hp[i] > 0. && !self.enemies.leaked[i])
                 {
+                    effective_targets = 1;
                     self.damage(ei, p.damage, p.pierce, false, p.tower_slot)
+                }
+                if effective_targets == 0 {
+                    self.telemetry.wasted_projectiles += 1;
                 }
                 if let Some(i) = target_index {
                     if p.kb > 0. && self.enemies.hp[i] > 0. {
                         self.enemies.d[i] = (self.enemies.d[i]
                             - p.kb
-                                * if self.relics[6] {
+                                * if self.perk_active(6) {
                                     self.params.rules.doctrine_knockback
                                 } else {
                                     1.
                                 }
                                 * (if self.enemies.boss[i] {
-                                    if self.relics[6] {
+                                    if self.perk_active(6) {
                                         self.params.rules.doctrine_boss_knockback
                                     } else {
                                         0.15
@@ -2060,7 +2122,7 @@ impl Sim {
                     if p.burn > 0. && self.enemies.hp[i] > 0. {
                         self.enemies.burn_t[i] = 3.;
                         self.enemies.burn_n[i] =
-                            (self.enemies.burn_n[i] + 1.).min(if self.relics[0] {
+                            (self.enemies.burn_n[i] + 1.).min(if self.perk_active(0) {
                                 self.params.rules.doctrine_burn_cap
                             } else {
                                 self.params.rules.burn_cap
@@ -2068,7 +2130,7 @@ impl Sim {
                         self.enemies.burn_p[i] = self.enemies.burn_p[i].max(p.burn)
                     }
                     if p.irr && self.enemies.hp[i] > 0. {
-                        self.enemies.irr[i] = if self.relics[10] {
+                        self.enemies.irr[i] = if self.perk_active(10) {
                             self.params.rules.doctrine_irradiate
                         } else {
                             0.5
@@ -2120,6 +2182,9 @@ impl Sim {
                     * self.enemies.burn_p[ei]
                     * (if self.enemies.irr[ei] > 0. { 2.4 } else { 1. })
                     * dt;
+                let eff = d.min(self.enemies.hp[ei].max(0.));
+                self.telemetry.effective_damage += eff;
+                self.telemetry.overkill_damage += (d - eff).max(0.);
                 self.enemies.hp[ei] -= d;
                 self.enemies.burn_t[ei] -= dt;
                 if self.enemies.burn_t[ei] <= 0. {
@@ -2133,7 +2198,9 @@ impl Sim {
             self.enemies.y[i] = p.1;
             if self.enemies.d[i] >= plen && !self.enemies.leaked[i] {
                 self.enemies.leaked[i] = true;
-                self.lives -= self.enemies.leak[i]
+                self.lives -= self.enemies.leak[i];
+                self.telemetry.leaks += 1;
+                self.telemetry.leak_damage += i64::from(self.enemies.leak[i]);
             }
         }
         // A JS projectile owns a reference to its target object. Update the
@@ -2173,7 +2240,7 @@ impl Sim {
         for i in 0..self.enemies.len() {
             if !self.enemies.leaked[i] && self.enemies.hp[i] <= 0. {
                 self.gold += self.enemies.bounty[i]
-                    + if self.relics[1] {
+                    + if self.perk_active(1) {
                         self.params.rules.doctrine_bounty
                     } else {
                         0.
@@ -2265,6 +2332,14 @@ fn apply_matching_actions(
 }
 
 pub fn run(input: &Input, params: Params) -> RunResult {
+    run_counterfactual(input, params, None).run
+}
+
+pub fn run_counterfactual(
+    input: &Input,
+    params: Params,
+    intervention: Option<PerkIntervention>,
+) -> CounterfactualRun {
     let mut sim = Sim::new(params, input.map);
     sim.endless = input.endless;
     sim.apply_initial(input.initial.as_ref());
@@ -2275,11 +2350,17 @@ pub fn run(input: &Input, params: Params) -> RunResult {
     let mut ticks = 0usize;
     while !sim.over && sim.wave < input.max_wave && ticks < 3_000_000 {
         let current_wave = sim.wave;
+        if let Some(intervention) = intervention {
+            sim.apply_perk_intervention(intervention);
+        }
         apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
             action.wave <= current_wave && action.tick.is_none() && action.op == "relic"
         });
         if !sim.pick.is_empty() {
             sim.choose_relic(input.seed);
+        }
+        if let Some(intervention) = intervention {
+            sim.apply_perk_intervention(intervention);
         }
         apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
             action.wave <= current_wave && action.tick.is_none() && action.op != "relic"
@@ -2301,7 +2382,7 @@ pub fn run(input: &Input, params: Params) -> RunResult {
         trace.push(sim.trace(sim.t - started));
     }
     let total = trace.iter().map(|x| x.seconds).sum();
-    RunResult {
+    let run = RunResult {
         protocol: 1,
         seed: input.seed.to_string(),
         map: input.map,
@@ -2309,7 +2390,10 @@ pub fn run(input: &Input, params: Params) -> RunResult {
         rejected,
         pending: pending.len(),
         result: sim.trace(total),
-    }
+    };
+    let mut telemetry = sim.telemetry;
+    telemetry.wasted_projectiles += sim.projectiles.len() as u64;
+    CounterfactualRun { run, telemetry }
 }
 
 pub fn debug_wave(input: &Input, target_wave: usize, params: Params) -> Vec<DebugTick> {
@@ -2981,6 +3065,66 @@ mod tests {
         let b = run_policy(&genome, 123, 1, 12, Params::default());
         assert_eq!(a.run.trace, b.run.trace);
         assert_eq!(a.actions.len(), b.actions.len());
+    }
+
+    #[test]
+    fn counterfactual_pairs_are_deterministic_and_collect_telemetry() {
+        let input = Input {
+            seed: 42,
+            map: 0,
+            max_wave: 2,
+            actions: vec![],
+            params: None,
+            initial: None,
+            endless: false,
+        };
+        let intervention = Some(PerkIntervention {
+            perk: 8,
+            enabled: true,
+            activation_wave: 0,
+        });
+        let a = run_counterfactual(&input, Params::default(), intervention);
+        let b = run_counterfactual(&input, Params::default(), intervention);
+        assert_eq!(a.run.trace, b.run.trace);
+        assert_eq!(a.telemetry.leaks, b.telemetry.leaks);
+        assert!(a.telemetry.leaks > 0);
+        assert_eq!(a.telemetry.projectiles_fired, 0);
+    }
+
+    #[test]
+    fn iron_curtain_intervention_applies_once() {
+        let input = Input {
+            seed: 17,
+            map: 1,
+            max_wave: 1,
+            actions: vec![],
+            params: None,
+            initial: None,
+            endless: false,
+        };
+        let params = Params::default();
+        let off = run_counterfactual(
+            &input,
+            params.clone(),
+            Some(PerkIntervention {
+                perk: 7,
+                enabled: false,
+                activation_wave: 0,
+            }),
+        );
+        let on = run_counterfactual(
+            &input,
+            params.clone(),
+            Some(PerkIntervention {
+                perk: 7,
+                enabled: true,
+                activation_wave: 0,
+            }),
+        );
+        assert_eq!(
+            on.run.result.lives - off.run.result.lives,
+            params.rules.doctrine_lives
+        );
     }
 
     #[test]

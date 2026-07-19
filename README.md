@@ -112,7 +112,14 @@ npm run lab:oracle-full
 npm run lab:policy-golden
 npm run lab:search-gates
 npm run lab:defender-gates
+npm run lab:sensitivity-smoke
 ```
+
+For doctrine sensitivity, `npm run lab:sensitivity` executes more than two
+million exact perk-off/perk-on comparisons (over five million simulations when
+policy-generation runs are included), reports paired 95% confidence intervals,
+and uses a genetic search to find contexts that maximize each doctrine's effect.
+The full run is intentionally not part of CI; the structural smoke gate is.
 
 CI uses a pinned Rust 1.96.1 toolchain and runs formatting, unit, oracle, policy,
 browser, attacker, and defender gates. Generated Cargo output and local reports
