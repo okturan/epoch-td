@@ -36,10 +36,16 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Check JavaScript syntax
-        run: node --check sim.js && node --check qa.js && node --check endless.js && node --check screenshot.js
+        run: node --check sim.js && node --check qa.js && node --check endless.js && node --check screenshot.js && node --check oracle.js && node --check balance-lab/golden/generate.js && node --check balance-lab/apply-params.js && node --check balance-lab/check-report.js && node --check balance-lab/check-defender.js
+
+      - name: Check Rust balance core and full oracle contract
+        run: cargo test --manifest-path balance-lab/Cargo.toml && npm run lab:oracle-full && npm run lab:policy-golden
 
       - name: Verify balance and browser behavior
         run: npm test
+
+      - name: Verify distributional search gates
+        run: npm run lab:search-gates && npm run lab:defender-gates
 
       - name: Reject tracked-output drift
         run: git diff --exit-code

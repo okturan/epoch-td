@@ -1,0 +1,33 @@
+<!doctype html><meta charset="utf-8"><title>EPOCH Balance Lab</title>
+<style>
+body{font:14px system-ui;background:#15151b;color:#ddd;max-width:1100px;margin:30px auto}h1{color:#ffd870}a{color:#ffd870}.cards{display:flex;gap:12px}.card{background:#24242e;padding:16px;border-radius:9px;flex:1}svg{background:#202029;border-radius:8px;margin-bottom:12px}table{width:100%;border-collapse:collapse}td,th{padding:7px;border-bottom:1px solid #333;text-align:left}.cell{display:inline-block;margin:3px;padding:18px}
+</style>
+<h1>EPOCH Balance Lab</h1><div class="cards" id="cards"></div>
+<div id="defender"></div><div id="attacker">
+<h2>Exploitability</h2><svg id="trend" width="1050" height="240"></svg>
+<h2>First-loss waves</h2><svg id="loss" width="1050" height="240"></svg>
+<h2>Clear-time curve</h2><svg id="clear" width="1050" height="240"></svg>
+<h2>Tower pick rate and damage contribution</h2><table id="picks"></table>
+<h2>Branch and fusion picks</h2><table id="specials"></table>
+<h2>MAP-Elites archive</h2><div id="heat"></div>
+<h2>Strongest strategies</h2><table id="table"></table>
+</div>
+<script>
+const D=__DATA__,NS='http://www.w3.org/2000/svg',names=['Rock','Catapult','Ballista','Brazier','Cannon','Gatling','Missile','Reactor','Drone Hub','Laser'],doctrines=['Napalm','Bounty','Rapid Logistics','Standing Army','War Economy','Scrap Drive','Shock','Iron Curtain','Rails','Siege Corps','Fission','Cold Snap'],powers=['Meteor','Stasis','Overdrive'];
+const replay=e=>'../../index.html?replay='+encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify({seed:e.seed,map:e.seed%3,maxWave:e.wave,actions:e.actions})))))
+function line(id,values,color='#ffd870'){const svg=document.getElementById(id),max=Math.max(1,...values),pts=values.map((x,i)=>`${20+i*1010/Math.max(1,values.length-1)},${215-x/max*190}`).join(' ');svg.innerHTML=`<polyline fill="none" stroke="${color}" stroke-width="3" points="${pts}"/>`}
+function bars(id,values){const svg=document.getElementById(id),max=Math.max(1,...values),w=1010/values.length;svg.innerHTML=values.map((x,i)=>`<rect x="${20+i*w}" y="${215-x/max*190}" width="${Math.max(1,w-2)}" height="${x/max*190}" fill="#5fc9d8"><title>wave ${i}: ${x}</title></rect>`).join('')}
+function band(id,rows){const svg=document.getElementById(id),max=Math.max(1,...rows.map(row=>row.mean+row.stddev)),xy=(value,i)=>`${20+i*1010/Math.max(1,rows.length-1)},${215-value/max*190}`,upper=rows.map((row,i)=>xy(row.mean+row.stddev,i)),lower=rows.map((row,i)=>xy(Math.max(0,row.mean-row.stddev),i)).reverse();svg.innerHTML=`<polygon fill="#7fe06f33" points="${upper.concat(lower).join(' ')}"/><polyline fill="none" stroke="#7fe06f" stroke-width="3" points="${rows.map((row,i)=>xy(row.mean,i)).join(' ')}"/>`}
+if(D.kind==='defender'){
+  attacker.hidden=true;const b=D.beforeAfter.before,a=D.beforeAfter.after;
+  cards.innerHTML=`<div class=card><b>${D.searchedCandidate.accepted?'accepted':'rejected'}</b><br>candidate</div><div class=card><b>${D.loss.toFixed(2)}</b><br>balance loss</div><div class=card><b>${D.gates.passed?'PASS':'FAIL'}</b><br>source gates</div>`;
+  defender.innerHTML=`<h2>Before / after</h2><table><tr><th>Metric</th><th>Before</th><th>After</th></tr>${[['Loss',b.loss,a.loss],['Mean first loss',b.metrics.meanFirstLossWave,a.metrics.meanFirstLossWave],['Exploitability',b.metrics.exploitability,a.metrics.exploitability],['Tower entropy',b.metrics.towerEntropy,a.metrics.towerEntropy]].map(r=>`<tr><td>${r[0]}</td><td>${r[1].toFixed(3)}</td><td>${r[2].toFixed(3)}</td></tr>`).join('')}</table><h2>Source-of-truth gates</h2><h3>Six gameplay criteria</h3><pre>${D.gates.sixCriteria.summary}</pre><h3>Isolation guard</h3><pre>${D.gates.isolationGuard.summary}</pre>`;
+}else{
+  cards.innerHTML=`<div class=card><b>${D.games.toLocaleString()}</b><br>games</div><div class=card><b>${D.gamesPerSecond.toFixed(0)}</b><br>games/sec</div><div class=card><b>${D.archive.length}</b><br>viable niches</div>`;
+  line('trend',D.history.map(x=>x.exploitability),'#ff8c1a');bars('loss',D.firstLossHistogram);band('clear',D.clearTimeCurve);
+  const totalPick=Math.max(1,D.towerPicks.reduce((a,b)=>a+b,0)),totalDamage=Math.max(1,D.towerDamage.reduce((a,b)=>a+b,0));picks.innerHTML='<tr><th>Tower</th><th>Pick rate</th><th>Damage contribution</th></tr>'+names.map((n,i)=>`<tr><td>${n}</td><td>${(D.towerPicks[i]/totalPick*100).toFixed(1)}%</td><td>${(D.towerDamage[i]/totalDamage*100).toFixed(1)}%</td></tr>`).join('');
+  specials.innerHTML='<tr><th>Choice</th><th>Count</th></tr>'+names.flatMap((n,i)=>D.branchPicks[i].map((count,branch)=>`<tr><td>${n} branch ${branch+1}</td><td>${count}</td></tr>`)).join('')+D.fusionPicks.map((count,i)=>`<tr><td>Fusion ${i+1}</td><td>${count}</td></tr>`).join('')+(D.doctrinePicks||[]).map((count,i)=>`<tr><td>Doctrine: ${doctrines[i]}</td><td>${count}</td></tr>`).join('')+(D.powerUses||[]).map((count,i)=>`<tr><td>Power: ${powers[i]}</td><td>${count}</td></tr>`).join('')+`<tr><td>Early calls</td><td>${D.earlyCalls||0}</td></tr>`;
+  heat.innerHTML=D.archive.map(e=>`<span class=cell title="fitness ${e.fitness.toFixed(0)}" style="background:hsl(${e.wave*5},55%,38%)">T${e.mono_tower+1} · W${e.wave}${e.fusion==null?'':' · F'+(e.fusion+1)}</span>`).join('');
+  table.innerHTML='<tr><th>Niche</th><th>Wave</th><th>Lives</th><th>Fitness</th><th>Seed</th><th>Replay</th></tr>'+D.archive.sort((a,b)=>b.fitness-a.fitness).map(e=>`<tr><td>mono tower ${e.mono_tower+1}</td><td>${e.wave}</td><td>${e.lives}</td><td>${e.fitness.toFixed(1)}</td><td>${e.seed}</td><td><a href="${replay(e)}">watch</a></td></tr>`).join('');
+}
+</script>

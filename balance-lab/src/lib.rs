@@ -33,6 +33,10 @@ pub struct Modifiers {
     pub sl: Option<f64>,
     #[serde(default)]
     pub hr: Option<f64>,
+    #[serde(default)]
+    pub rm: Option<f64>,
+    #[serde(default)]
+    pub bf: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -74,9 +78,214 @@ pub struct Constants {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct FusionSpec {
+    pub a: usize,
+    pub b: usize,
+    pub level: u8,
+    pub base: usize,
+    pub modifiers: Modifiers,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Rules {
+    pub upgrade_cost: f64,
+    pub sell_refund: f64,
+    pub doctrine_upgrade_cost: f64,
+    pub doctrine_sell_refund: f64,
+    pub doctrine_bounty: f64,
+    pub doctrine_range: f64,
+    pub doctrine_cooldown: f64,
+    pub doctrine_knockback: f64,
+    pub doctrine_boss_knockback: f64,
+    pub doctrine_lives: i32,
+    pub doctrine_projectile_speed: f64,
+    pub doctrine_splash: f64,
+    pub doctrine_irradiate: f64,
+    pub doctrine_slow: f64,
+    pub burn_cap: f64,
+    pub doctrine_burn_cap: f64,
+    pub power_cooldowns: [f64; 3],
+    pub power_ages: [usize; 3],
+    pub meteor_damage: f64,
+    pub meteor_radius: f64,
+    pub stasis_duration: f64,
+    pub stasis_factor: f64,
+    pub overdrive_duration: f64,
+    pub overdrive_multiplier: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Params {
     pub constants: Constants,
     pub towers: Vec<TowerSpec>,
+    pub fusions: Vec<FusionSpec>,
+    pub rules: Rules,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ConstantsPatch {
+    pub hp: Option<f64>,
+    #[serde(rename = "g")]
+    pub growth: Option<f64>,
+    #[serde(rename = "cnt")]
+    pub count: Option<f64>,
+    #[serde(rename = "spd")]
+    pub speed: Option<f64>,
+    #[serde(rename = "bty")]
+    pub bounty: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct TowerPatch {
+    #[serde(rename = "c")]
+    pub cost: Option<f64>,
+    #[serde(rename = "d")]
+    pub damage: Option<f64>,
+    #[serde(rename = "r")]
+    pub rate: Option<f64>,
+    #[serde(rename = "rg")]
+    pub range: Option<f64>,
+    #[serde(rename = "sp")]
+    pub splash: Option<f64>,
+    #[serde(rename = "pi")]
+    pub pierce: Option<bool>,
+    #[serde(rename = "bu")]
+    pub burn: Option<bool>,
+    #[serde(rename = "kb")]
+    pub knockback: Option<f64>,
+    pub ramp: Option<bool>,
+    #[serde(rename = "home")]
+    pub homing: Option<bool>,
+    pub aura: Option<bool>,
+    pub field: Option<bool>,
+    pub beam: Option<bool>,
+    #[serde(rename = "b1")]
+    pub branch1: Option<Modifiers>,
+    #[serde(rename = "b2")]
+    pub branch2: Option<Modifiers>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct FusionPatch {
+    pub a: Option<usize>,
+    pub b: Option<usize>,
+    #[serde(rename = "lv")]
+    pub level: Option<u8>,
+    pub base: Option<usize>,
+    #[serde(rename = "f")]
+    pub modifiers: Option<Modifiers>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ParamsPatch {
+    pub constants: Option<ConstantsPatch>,
+    pub towers: Option<Vec<TowerPatch>>,
+    pub fusions: Option<Vec<FusionPatch>>,
+    pub rules: Option<Rules>,
+}
+
+impl ParamsPatch {
+    pub fn apply(&self) -> Params {
+        let mut params = Params::default();
+        if let Some(patch) = &self.constants {
+            if let Some(value) = patch.hp {
+                params.constants.hp = value
+            }
+            if let Some(value) = patch.growth {
+                params.constants.growth = value
+            }
+            if let Some(value) = patch.count {
+                params.constants.count = value
+            }
+            if let Some(value) = patch.speed {
+                params.constants.speed = value
+            }
+            if let Some(value) = patch.bounty {
+                params.constants.bounty = value
+            }
+        }
+        if let Some(towers) = &self.towers {
+            for (tower, patch) in params.towers.iter_mut().zip(towers) {
+                if let Some(value) = patch.cost {
+                    tower.cost = value
+                }
+                if let Some(value) = patch.damage {
+                    tower.damage = value
+                }
+                if let Some(value) = patch.rate {
+                    tower.rate = value
+                }
+                if let Some(value) = patch.range {
+                    tower.range = value
+                }
+                if let Some(value) = patch.splash {
+                    tower.splash = value
+                }
+                if let Some(value) = patch.pierce {
+                    tower.pierce = value
+                }
+                if let Some(value) = patch.burn {
+                    tower.burn = value
+                }
+                if let Some(value) = patch.knockback {
+                    tower.knockback = value
+                }
+                if let Some(value) = patch.ramp {
+                    tower.ramp = value
+                }
+                if let Some(value) = patch.homing {
+                    tower.homing = value
+                }
+                if let Some(value) = patch.aura {
+                    tower.aura = value
+                }
+                if let Some(value) = patch.field {
+                    tower.field = value
+                }
+                if let Some(value) = patch.beam {
+                    tower.beam = value
+                }
+                if let Some(value) = &patch.branch1 {
+                    merge_modifiers(&mut tower.branch1, value)
+                }
+                if let Some(value) = &patch.branch2 {
+                    merge_modifiers(&mut tower.branch2, value)
+                }
+            }
+        }
+        if let Some(fusions) = &self.fusions {
+            for (fusion, patch) in params.fusions.iter_mut().zip(fusions) {
+                if let Some(value) = patch.a {
+                    fusion.a = value
+                }
+                if let Some(value) = patch.b {
+                    fusion.b = value
+                }
+                if let Some(value) = patch.level {
+                    fusion.level = value
+                }
+                if let Some(value) = patch.base {
+                    fusion.base = value
+                }
+                if let Some(value) = &patch.modifiers {
+                    merge_modifiers(&mut fusion.modifiers, value)
+                }
+            }
+        }
+        if let Some(rules) = &self.rules {
+            params.rules = rules.clone();
+        }
+        params
+    }
+}
+
+fn merge_modifiers(target: &mut Modifiers, patch: &Modifiers) {
+    macro_rules! merge {
+        ($($field:ident),+ $(,)?) => {$(
+            if patch.$field.is_some() { target.$field = patch.$field; }
+        )+};
+    }
+    merge!(dm, sp, pv, rgm, kb, pi, bu, bum, hc, sf, ir, sl, hr, rm, bf);
 }
 
 impl Default for Params {
@@ -95,6 +304,8 @@ impl Default for Params {
             ir,
             sl,
             hr,
+            rm: None,
+            bf: None,
         };
         let z = || Modifiers::default();
         Self {
@@ -228,21 +439,25 @@ impl Default for Params {
                         None,
                         None,
                     ),
-                    branch2: m(
-                        Some(0.7),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    ),
+                    branch2: {
+                        let mut branch = m(
+                            Some(0.7),
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        );
+                        branch.rm = Some(2.);
+                        branch
+                    },
                 },
                 TowerSpec {
                     name: "Brazier".into(),
@@ -553,6 +768,105 @@ impl Default for Params {
                     ),
                 },
             ],
+            fusions: vec![
+                FusionSpec {
+                    a: 1,
+                    b: 3,
+                    level: 2,
+                    base: 1,
+                    modifiers: Modifiers {
+                        dm: Some(2.),
+                        sp: Some(1.4),
+                        bu: Some(1.),
+                        bum: Some(2.),
+                        ..Default::default()
+                    },
+                },
+                FusionSpec {
+                    a: 2,
+                    b: 4,
+                    level: 2,
+                    base: 4,
+                    modifiers: Modifiers {
+                        dm: Some(2.),
+                        pi: Some(1.),
+                        kb: Some(1.1),
+                        ..Default::default()
+                    },
+                },
+                FusionSpec {
+                    a: 6,
+                    b: 7,
+                    level: 2,
+                    base: 6,
+                    modifiers: Modifiers {
+                        dm: Some(1.2),
+                        ir: Some(1.),
+                        ..Default::default()
+                    },
+                },
+                FusionSpec {
+                    a: 5,
+                    b: 8,
+                    level: 2,
+                    base: 5,
+                    modifiers: Modifiers {
+                        dm: Some(1.5),
+                        hc: Some(12.),
+                        sl: Some(1.),
+                        ..Default::default()
+                    },
+                },
+                FusionSpec {
+                    a: 9,
+                    b: 7,
+                    level: 3,
+                    base: 9,
+                    modifiers: Modifiers {
+                        dm: Some(1.15),
+                        hr: Some(1.5),
+                        ir: Some(1.),
+                        ..Default::default()
+                    },
+                },
+                FusionSpec {
+                    a: usize::MAX,
+                    b: usize::MAX,
+                    level: 5,
+                    base: usize::MAX,
+                    modifiers: Modifiers {
+                        dm: Some(1.6),
+                        rgm: Some(1.15),
+                        ..Default::default()
+                    },
+                },
+            ],
+            rules: Rules {
+                upgrade_cost: 0.6,
+                sell_refund: 0.7,
+                doctrine_upgrade_cost: 0.5,
+                doctrine_sell_refund: 0.85,
+                doctrine_bounty: 1.,
+                doctrine_range: 1.08,
+                doctrine_cooldown: 0.7,
+                doctrine_knockback: 1.5,
+                doctrine_boss_knockback: 0.3,
+                doctrine_lives: 3,
+                doctrine_projectile_speed: 1.3,
+                doctrine_splash: 1.2,
+                doctrine_irradiate: 1.,
+                doctrine_slow: 0.5,
+                burn_cap: 5.,
+                doctrine_burn_cap: 7.,
+                power_cooldowns: [45., 30., 40.],
+                power_ages: [1, 4, 7],
+                meteor_damage: 3.,
+                meteor_radius: 1.5,
+                stasis_duration: 2.5,
+                stasis_factor: 0.15,
+                overdrive_duration: 8.,
+                overdrive_multiplier: 1.5,
+            },
         }
     }
 }
@@ -576,7 +890,7 @@ struct Wave {
 fn wave_row(c: &Constants, w: usize) -> Wave {
     let k = (w as f64 / 5.).ceil() as usize;
     let p = (w - 1) % 5;
-    let boss = p == 4 && k % 2 == 0;
+    let boss = p == 4 && k.is_multiple_of(2);
     let rush = p == 4 && k % 2 == 1;
     let ai = if p == 1 { k.saturating_sub(2) } else { k - 1 } % 10;
     let (hm, sm, armor, rf, split, cf, dash) = match ai {
@@ -684,6 +998,84 @@ struct Enemy {
     slow_f: f64,
     leaked: bool,
 }
+#[derive(Default)]
+struct EnemySoa {
+    id: Vec<u64>,
+    row: Vec<Wave>,
+    d: Vec<f64>,
+    x: Vec<f64>,
+    y: Vec<f64>,
+    hp: Vec<f64>,
+    max: Vec<f64>,
+    speed: Vec<f64>,
+    armor: Vec<f64>,
+    regen: Vec<f64>,
+    cap: Vec<f64>,
+    dash: Vec<bool>,
+    dc: Vec<f64>,
+    inc: Vec<f64>,
+    split: Vec<bool>,
+    bounty: Vec<f64>,
+    leak: Vec<i32>,
+    boss: Vec<bool>,
+    burn_n: Vec<f64>,
+    burn_t: Vec<f64>,
+    burn_p: Vec<f64>,
+    irr: Vec<f64>,
+    slow: Vec<f64>,
+    slow_f: Vec<f64>,
+    leaked: Vec<bool>,
+}
+impl EnemySoa {
+    fn with_capacity(n: usize) -> Self {
+        let mut s = Self::default();
+        s.reserve(n);
+        s
+    }
+    fn reserve(&mut self, n: usize) {
+        macro_rules! r{($($f:ident),*)=>{$(self.$f.reserve(n);)*}}
+        r!(
+            id, row, d, x, y, hp, max, speed, armor, regen, cap, dash, dc, inc, split, bounty,
+            leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, leaked
+        );
+    }
+    fn len(&self) -> usize {
+        self.id.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.id.is_empty()
+    }
+    fn push(&mut self, e: Enemy) {
+        assert!(self.len() < self.id.capacity(), "enemy arena exhausted");
+        macro_rules! p{($($f:ident),*)=>{$(self.$f.push(e.$f);)*}}
+        p!(
+            id, row, d, x, y, hp, max, speed, armor, regen, cap, dash, dc, inc, split, bounty,
+            leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, leaked
+        );
+    }
+    fn retain_alive(&mut self) {
+        let mut w = 0;
+        for i in 0..self.len() {
+            if !self.leaked[i] && self.hp[i] > 0. {
+                if i != w {
+                    self.id[w] = self.id[i];
+                    self.row[w] = self.row[i].clone();
+                    macro_rules! c{($($f:ident),*)=>{$(self.$f[w]=self.$f[i];)*}}
+                    c!(
+                        d, x, y, hp, max, speed, armor, regen, cap, dash, dc, inc, split, bounty,
+                        leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, leaked
+                    );
+                }
+                w += 1
+            }
+        }
+        macro_rules! t{($($f:ident),*)=>{$(self.$f.truncate(w);)*}}
+        t!(
+            id, row, d, x, y, hp, max, speed, armor, regen, cap, dash, dc, inc, split, bounty,
+            leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, leaked
+        );
+    }
+}
 #[derive(Clone, Debug)]
 struct Tower {
     i: usize,
@@ -707,6 +1099,8 @@ struct Projectile {
     x: f64,
     y: f64,
     target: u64,
+    target_x: f64,
+    target_y: f64,
     v: f64,
     damage: f64,
     splash: f64,
@@ -715,8 +1109,71 @@ struct Projectile {
     burn: f64,
     irr: bool,
     slow: bool,
-    tower_i: usize,
     tower_slot: usize,
+}
+#[derive(Default)]
+struct ProjectileSoa {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    target: Vec<u64>,
+    target_x: Vec<f64>,
+    target_y: Vec<f64>,
+    v: Vec<f64>,
+    damage: Vec<f64>,
+    splash: Vec<f64>,
+    kb: Vec<f64>,
+    pierce: Vec<bool>,
+    burn: Vec<f64>,
+    irr: Vec<bool>,
+    slow: Vec<bool>,
+    tower_slot: Vec<usize>,
+}
+impl ProjectileSoa {
+    fn with_capacity(n: usize) -> Self {
+        let mut s = Self::default();
+        macro_rules! r{($($f:ident),*)=>{$(s.$f.reserve(n);)*}}
+        r!(
+            x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
+            tower_slot
+        );
+        s
+    }
+    fn len(&self) -> usize {
+        self.x.len()
+    }
+    fn clear(&mut self) {
+        macro_rules! c{($($f:ident),*)=>{$(self.$f.clear();)*}}
+        c!(
+            x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
+            tower_slot
+        );
+    }
+    fn push(&mut self, p: Projectile) {
+        assert!(self.len() < self.x.capacity(), "projectile arena exhausted");
+        macro_rules! q{($($f:ident),*)=>{$(self.$f.push(p.$f);)*}}
+        q!(
+            x, y, target, target_x, target_y, v, damage, splash, kb, pierce, burn, irr, slow,
+            tower_slot
+        );
+    }
+    fn get(&self, i: usize) -> Projectile {
+        Projectile {
+            x: self.x[i],
+            y: self.y[i],
+            target: self.target[i],
+            target_x: self.target_x[i],
+            target_y: self.target_y[i],
+            v: self.v[i],
+            damage: self.damage[i],
+            splash: self.splash[i],
+            kb: self.kb[i],
+            pierce: self.pierce[i],
+            burn: self.burn[i],
+            irr: self.irr[i],
+            slow: self.slow[i],
+            tower_slot: self.tower_slot[i],
+        }
+    }
 }
 #[derive(Clone, Debug)]
 struct Spawn {
@@ -728,6 +1185,8 @@ struct Spawn {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Action {
     pub wave: usize,
+    #[serde(default)]
+    pub tick: Option<u32>,
     pub op: String,
     #[serde(default)]
     pub tower: usize,
@@ -756,6 +1215,19 @@ pub struct Input {
     pub max_wave: usize,
     #[serde(default)]
     pub actions: Vec<Action>,
+    #[serde(default)]
+    pub params: Option<ParamsPatch>,
+    #[serde(default)]
+    pub initial: Option<InitialState>,
+    #[serde(default)]
+    pub endless: bool,
+}
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InitialState {
+    pub gold: Option<f64>,
+    pub lives: Option<i32>,
+    pub wave: Option<usize>,
 }
 fn fifty() -> usize {
     50
@@ -794,6 +1266,18 @@ pub struct RunResult {
     pub result: WaveTrace,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugTick {
+    pub tick: usize,
+    pub gold: f64,
+    pub lives: i32,
+    pub kills: u64,
+    pub enemies: Vec<(f64, f64, f64, f64)>,
+    pub projectiles: Vec<(f64, f64, usize, usize)>,
+    pub tower_damage: Vec<f64>,
+}
+
 pub struct Sim {
     pub params: Params,
     map: usize,
@@ -804,13 +1288,22 @@ pub struct Sim {
     phase_wave: bool,
     spawns: Vec<Spawn>,
     t: f64,
-    enemies: Vec<Enemy>,
+    enemies: EnemySoa,
     towers: Vec<Tower>,
-    projectiles: Vec<Projectile>,
+    projectiles: ProjectileSoa,
+    projectile_scratch: ProjectileSoa,
+    born_scratch: Vec<Wave>,
+    hit_scratch: Vec<usize>,
+    split_scratch: Vec<(Wave, f64, Option<f64>)>,
     kills: u64,
     over: bool,
     won: bool,
     next_enemy: u64,
+    relics: [bool; 12],
+    pick: Vec<usize>,
+    power_cooldowns: [f64; 3],
+    overdrive: f64,
+    endless: bool,
 }
 
 impl Sim {
@@ -823,18 +1316,39 @@ impl Sim {
             lives: 20,
             wave: 0,
             phase_wave: false,
-            spawns: vec![],
+            spawns: Vec::with_capacity(128),
             t: 0.,
-            enemies: vec![],
-            towers: vec![],
-            projectiles: vec![],
+            enemies: EnemySoa::with_capacity(2048),
+            towers: Vec::with_capacity(80),
+            projectiles: ProjectileSoa::with_capacity(8192),
+            projectile_scratch: ProjectileSoa::with_capacity(8192),
+            born_scratch: Vec::with_capacity(128),
+            hit_scratch: Vec::with_capacity(2048),
+            split_scratch: Vec::with_capacity(4096),
             kills: 0,
             over: false,
             won: false,
             next_enemy: 1,
+            relics: [false; 12],
+            pick: vec![],
+            power_cooldowns: [0.; 3],
+            overdrive: 0.,
+            endless: false,
         };
         s.set_map(map);
         s
+    }
+    fn apply_initial(&mut self, initial: Option<&InitialState>) {
+        let Some(initial) = initial else { return };
+        if let Some(value) = initial.gold {
+            self.gold = value
+        }
+        if let Some(value) = initial.lives {
+            self.lives = value
+        }
+        if let Some(value) = initial.wave {
+            self.wave = value
+        }
     }
     fn set_map(&mut self, map: usize) {
         let maps: [[(i32, i32); 8]; 3] = [
@@ -905,7 +1419,7 @@ impl Sim {
     }
     fn modifiers(&self, t: &Tower) -> Modifiers {
         if let Some(f) = t.fusion {
-            fusion_mod(f)
+            self.params.fusions[f].modifiers.clone()
         } else {
             match t.branch {
                 1 => self.params.towers[t.i].branch1.clone(),
@@ -960,7 +1474,13 @@ impl Sim {
                 .is_some_and(|i| self.branch(i, a.branch)),
             "sell" => {
                 if let Some(i) = self.tower_at(a.x, a.y) {
-                    self.gold += (self.towers[i].inv * 0.7).round();
+                    self.gold += (self.towers[i].inv
+                        * if self.relics[4] {
+                            self.params.rules.doctrine_sell_refund
+                        } else {
+                            self.params.rules.sell_refund
+                        })
+                    .round();
                     self.towers.remove(i);
                     self.calc_buffs();
                     true
@@ -1007,6 +1527,9 @@ impl Sim {
                 }
             }
             "fuse" => self.fuse(a),
+            "relic" => self.choose_relic_id(a.tower),
+            "power" => self.power(a.tower, a.x, a.y),
+            "early" => self.early_call(),
             _ => false,
         }
     }
@@ -1045,7 +1568,13 @@ impl Sim {
         true
     }
     fn upgrade(&mut self, i: usize) -> bool {
-        let c = (self.params.towers[self.towers[i].i].cost * 0.6).round();
+        let c = (self.params.towers[self.towers[i].i].cost
+            * if self.relics[5] {
+                self.params.rules.doctrine_upgrade_cost
+            } else {
+                self.params.rules.upgrade_cost
+            })
+        .round();
         if self.towers[i].level >= 3 || self.gold < c {
             return false;
         }
@@ -1073,26 +1602,27 @@ impl Sim {
         let Some(j) = self.tower_at(p.x, p.y) else {
             return false;
         };
+        if self.towers[i].fusion.is_some() || self.towers[j].fusion.is_some() {
+            return false;
+        }
         let (ai, bi) = (self.towers[i].i, self.towers[j].i);
-        let recipe = [
-            (1, 3, 2, 1),
-            (2, 4, 2, 4),
-            (6, 7, 2, 6),
-            (5, 8, 2, 5),
-            (9, 7, 3, 9),
-        ]
-        .iter()
-        .position(|&(x, y, l, _)| {
-            self.towers[i].level >= l
-                && self.towers[j].level >= l
-                && ((ai == x && bi == y) || (ai == y && bi == x))
+        let recipe = self.params.fusions.iter().position(|fusion| {
+            let ascendant = fusion.a == usize::MAX
+                && ai == bi
+                && self.towers[i].branch == self.towers[j].branch;
+            self.towers[i].level >= fusion.level
+                && self.towers[j].level >= fusion.level
+                && (ascendant
+                    || ((ai == fusion.a && bi == fusion.b) || (ai == fusion.b && bi == fusion.a)))
         });
         let Some(r) = recipe else { return false };
-        let base = [1, 4, 6, 5, 9][r];
+        let base = self.params.fusions[r].base;
         let inv = self.towers[j].inv;
         let keep = if j < i { i - 1 } else { i };
         self.towers.remove(j);
-        self.towers[keep].i = base;
+        if base != usize::MAX {
+            self.towers[keep].i = base;
+        }
         self.towers[keep].fusion = Some(r);
         self.towers[keep].branch = 0;
         self.towers[keep].inv += inv;
@@ -1101,7 +1631,7 @@ impl Sim {
         true
     }
     fn start_wave(&mut self) {
-        if self.over || self.wave >= 50 {
+        if self.over || !self.pick.is_empty() || (self.wave >= 50 && !self.endless) {
             return;
         }
         let r = wave_row(&self.params.constants, self.wave + 1);
@@ -1112,6 +1642,79 @@ impl Sim {
         });
         self.phase_wave = true;
         self.wave += 1
+    }
+    fn early_call(&mut self) -> bool {
+        if !self.phase_wave
+            || self.over
+            || !self.pick.is_empty()
+            || self.wave >= 50
+            || self.spawns.len() > 1
+        {
+            return false;
+        }
+        self.gold += (2. + self.wave as f64 * 0.5).round();
+        let row = wave_row(&self.params.constants, self.wave + 1);
+        self.spawns.push(Spawn { row, sn: 0, st: 0. });
+        self.wave += 1;
+        true
+    }
+    fn choose_relic_id(&mut self, relic: usize) -> bool {
+        if !self.pick.contains(&relic) {
+            return false;
+        }
+        self.relics[relic] = true;
+        if relic == 7 {
+            self.lives += self.params.rules.doctrine_lives;
+        }
+        self.pick.clear();
+        true
+    }
+    fn choose_relic(&mut self, seed: u64) {
+        if self.pick.is_empty() {
+            return;
+        }
+        let choice = (seed.wrapping_add(self.wave as u64) as usize) % self.pick.len();
+        let relic = self.pick[choice];
+        self.choose_relic_id(relic);
+    }
+    fn power(&mut self, power: usize, x: i32, y: i32) -> bool {
+        let age = self.wave.saturating_sub(usize::from(self.phase_wave)) / 5;
+        if power >= 3
+            || self.power_cooldowns[power] > 0.
+            || age < self.params.rules.power_ages[power]
+        {
+            return false;
+        }
+        self.power_cooldowns[power] = self.params.rules.power_cooldowns[power]
+            * if self.relics[2] {
+                self.params.rules.doctrine_cooldown
+            } else {
+                1.
+            };
+        match power {
+            0 => {
+                let damage = self.params.rules.meteor_damage
+                    * self.params.constants.hp
+                    * self.params.constants.growth.powi(self.wave as i32);
+                for i in 0..self.enemies.len() {
+                    if (self.enemies.x[i] - x as f64).powi(2)
+                        + (self.enemies.y[i] - y as f64).powi(2)
+                        <= self.params.rules.meteor_radius.powi(2)
+                    {
+                        self.enemies.hp[i] -= damage;
+                    }
+                }
+            }
+            1 => {
+                for i in 0..self.enemies.len() {
+                    self.enemies.slow[i] = self.params.rules.stasis_duration;
+                    self.enemies.slow_f[i] = self.params.rules.stasis_factor;
+                }
+            }
+            2 => self.overdrive = self.params.rules.overdrive_duration,
+            _ => unreachable!(),
+        }
+        true
     }
     fn spawn_enemy(&mut self, row: Wave, d: f64, f: Option<f64>) {
         let mul = f.unwrap_or(1.);
@@ -1147,32 +1750,36 @@ impl Sim {
         self.next_enemy += 1;
         self.enemies.push(e)
     }
-    fn in_range(t: &Tower, e: &Enemy, r: f64) -> bool {
-        (e.x - t.x as f64 - 0.5).powi(2) + (e.y - t.y as f64 - 0.5).powi(2) <= r * r
+    fn in_range(t: &Tower, enemies: &EnemySoa, i: usize, r: f64) -> bool {
+        (enemies.x[i] - t.x as f64 - 0.5).powi(2) + (enemies.y[i] - t.y as f64 - 0.5).powi(2)
+            <= r * r
     }
     fn enemy_idx(&self, id: u64) -> Option<usize> {
-        self.enemies.iter().position(|e| e.id == id)
+        self.enemies
+            .id
+            .iter()
+            .position(|&candidate| candidate == id)
     }
     fn raw(&mut self, ei: usize, d: f64, tower: Option<usize>) {
-        let eff = d.min(self.enemies[ei].hp.max(0.));
-        self.enemies[ei].hp -= d;
-        if let Some(t) = tower {
-            if t < self.towers.len() {
-                self.towers[t].damage += eff
-            }
+        let eff = d.min(self.enemies.hp[ei].max(0.));
+        self.enemies.hp[ei] -= d;
+        if let Some(t) = tower
+            && t < self.towers.len()
+        {
+            self.towers[t].damage += eff
         }
     }
     fn damage(&mut self, ei: usize, mut d: f64, pierce: bool, slow_bonus: bool, tower: usize) {
         if !pierce {
-            d = (d - self.enemies[ei].armor).max(1.)
+            d = (d - self.enemies.armor[ei]).max(1.)
         }
-        if self.enemies[ei].cap > 0. {
-            d = d.min(self.enemies[ei].cap)
+        if self.enemies.cap[ei] > 0. {
+            d = d.min(self.enemies.cap[ei])
         }
-        if self.enemies[ei].irr > 0. {
+        if self.enemies.irr[ei] > 0. {
             d *= 1.2
         }
-        if slow_bonus && self.enemies[ei].slow > 0. {
+        if slow_bonus && self.enemies.slow[ei] > 0. {
             d *= 1.4
         }
         self.raw(ei, d, Some(tower))
@@ -1182,44 +1789,75 @@ impl Sim {
             return;
         }
         self.t += dt;
-        let mut born_rows = vec![];
+        self.overdrive = (self.overdrive - dt).max(0.);
+        for cooldown in &mut self.power_cooldowns {
+            *cooldown = (*cooldown - dt).max(0.);
+        }
+        self.born_scratch.clear();
         for j in &mut self.spawns {
             j.st -= dt;
             if j.st <= 0. && j.sn < j.row.n {
-                born_rows.push(j.row.clone());
+                assert!(
+                    self.born_scratch.len() < self.born_scratch.capacity(),
+                    "spawn scratch exhausted"
+                );
+                self.born_scratch.push(j.row.clone());
                 j.sn += 1;
                 j.st += if j.row.rush { 0.28 } else { 0.8 }
             }
         }
         self.spawns.retain(|j| j.sn < j.row.n);
-        for r in born_rows {
+        let mut born_rows = std::mem::take(&mut self.born_scratch);
+        for r in born_rows.drain(..) {
             self.spawn_enemy(r, 0., None)
         }
+        self.born_scratch = born_rows;
         for ti in 0..self.towers.len() {
             let spec = self.params.towers[self.towers[ti].i].clone();
             let b = self.modifiers(&self.towers[ti]);
             let mult =
                 1.5f64.powi(self.towers[ti].level as i32) * b.dm.unwrap_or(1.) * self.towers[ti].mb;
-            let range =
-                spec.range * b.rgm.unwrap_or(1.) * (1. + 0.06 * self.towers[ti].level as f64);
+            let range = spec.range
+                * b.rgm.unwrap_or(1.)
+                * (1. + 0.06 * self.towers[ti].level as f64)
+                * if self.relics[3] {
+                    self.params.rules.doctrine_range
+                } else {
+                    1.
+                };
             if spec.field {
-                for e in &mut self.enemies {
-                    if Self::in_range(&self.towers[ti], e, range) && e.slow < 0.2 {
-                        e.slow = 0.15;
-                        e.slow_f = b.sf.unwrap_or(0.6)
+                for ei in 0..self.enemies.len() {
+                    if Self::in_range(&self.towers[ti], &self.enemies, ei, range)
+                        && self.enemies.slow[ei] < 0.2
+                    {
+                        self.enemies.slow[ei] = 0.15;
+                        self.enemies.slow_f[ei] = b.sf.unwrap_or(if self.relics[11] {
+                            self.params.rules.doctrine_slow
+                        } else {
+                            0.6
+                        })
                     }
                 }
                 continue;
             }
             if spec.aura {
                 for ei in 0..self.enemies.len() {
-                    if Self::in_range(&self.towers[ti], &self.enemies[ei], range) {
+                    if Self::in_range(&self.towers[ti], &self.enemies, ei, range) {
                         let d = spec.damage
                             * mult
                             * dt
-                            * (if self.enemies[ei].irr > 0. { 1.2 } else { 1. });
+                            * if self.overdrive > 0. {
+                                self.params.rules.overdrive_multiplier
+                            } else {
+                                1.
+                            }
+                            * (if self.enemies.irr[ei] > 0. { 1.2 } else { 1. });
                         self.raw(ei, d, Some(ti));
-                        self.enemies[ei].irr = 0.5
+                        self.enemies.irr[ei] = if self.relics[10] {
+                            self.params.rules.doctrine_irradiate
+                        } else {
+                            0.5
+                        }
                     }
                 }
                 continue;
@@ -1228,13 +1866,15 @@ impl Sim {
                 let valid = self.towers[ti]
                     .lock
                     .and_then(|id| self.enemy_idx(id))
-                    .filter(|&i| self.enemies[i].hp > 0. && !self.enemies[i].leaked);
+                    .filter(|&i| self.enemies.hp[i] > 0. && !self.enemies.leaked[i]);
                 if valid.is_none() {
-                    self.towers[ti].lock = self
-                        .enemies
-                        .iter()
-                        .max_by(|a, b| a.max.total_cmp(&b.max))
-                        .map(|e| e.id);
+                    let mut chosen: Option<usize> = None;
+                    for i in 0..self.enemies.len() {
+                        if chosen.is_none_or(|old| self.enemies.max[i] > self.enemies.max[old]) {
+                            chosen = Some(i);
+                        }
+                    }
+                    self.towers[ti].lock = chosen.map(|i| self.enemies.id[i]);
                     self.towers[ti].heat = 0.
                 }
                 if let Some(ei) = self.towers[ti].lock.and_then(|id| self.enemy_idx(id)) {
@@ -1243,32 +1883,51 @@ impl Sim {
                         * (1. + self.towers[ti].heat)
                         * mult
                         * dt
-                        * (if self.enemies[ei].irr > 0. { 1.2 } else { 1. });
+                        * if self.overdrive > 0. {
+                            self.params.rules.overdrive_multiplier
+                        } else {
+                            1.
+                        }
+                        * (if self.enemies.irr[ei] > 0. { 1.2 } else { 1. });
                     self.raw(ei, d, Some(ti));
                     if b.ir.is_some() {
-                        self.enemies[ei].irr = 0.5
+                        self.enemies.irr[ei] = if self.relics[10] {
+                            self.params.rules.doctrine_irradiate
+                        } else {
+                            0.5
+                        }
                     }
                 }
                 continue;
             }
-            self.towers[ti].cd -= dt * self.towers[ti].buff;
-            let target = if spec.homing {
-                self.enemies
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, e)| Self::in_range(&self.towers[ti], e, range) && e.hp > e.inc)
-                    .max_by(|(_, a), (_, b)| (a.hp - a.inc).total_cmp(&(b.hp - b.inc)))
-                    .map(|x| x.0)
-            } else {
-                self.enemies
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, e)| Self::in_range(&self.towers[ti], e, range))
-                    .max_by(|(_, a), (_, b)| a.d.total_cmp(&b.d))
-                    .map(|x| x.0)
-            };
+            self.towers[ti].cd -= dt
+                * self.towers[ti].buff
+                * if self.overdrive > 0. {
+                    self.params.rules.overdrive_multiplier
+                } else {
+                    1.
+                };
+            let mut target: Option<usize> = None;
+            for i in 0..self.enemies.len() {
+                if !Self::in_range(&self.towers[ti], &self.enemies, i, range)
+                    || (spec.homing && self.enemies.hp[i] <= self.enemies.inc[i])
+                {
+                    continue;
+                }
+                let better = target.is_none_or(|old| {
+                    if spec.homing {
+                        self.enemies.hp[i] - self.enemies.inc[i]
+                            > self.enemies.hp[old] - self.enemies.inc[old] + 1e-9
+                    } else {
+                        self.enemies.d[i] > self.enemies.d[old]
+                    }
+                });
+                if better {
+                    target = Some(i);
+                }
+            }
             if spec.ramp {
-                let id = target.map(|i| self.enemies[i].id);
+                let id = target.map(|i| self.enemies.id[i]);
                 if self.towers[ti].lock != id {
                     self.towers[ti].lock = id;
                     self.towers[ti].heat = 0.
@@ -1293,10 +1952,17 @@ impl Sim {
                 self.projectiles.push(Projectile {
                     x: self.towers[ti].x as f64 + 0.5,
                     y: self.towers[ti].y as f64 + 0.5,
-                    target: self.enemies[ei].id,
+                    target: self.enemies.id[ei],
+                    target_x: self.enemies.x[ei],
+                    target_y: self.enemies.y[ei],
                     v: (if spec.homing { 5. } else { 12. })
                         * (1. + 0.1 * self.towers[ti].level as f64)
-                        * b.pv.unwrap_or(1.),
+                        * b.pv.unwrap_or(1.)
+                        * if self.relics[8] {
+                            self.params.rules.doctrine_projectile_speed
+                        } else {
+                            1.
+                        },
                     damage,
                     splash: b.sp.unwrap_or(spec.splash),
                     kb: b.kb.unwrap_or(spec.knockback),
@@ -1310,125 +1976,216 @@ impl Sim {
                     },
                     irr: self.towers[ti].rad || b.ir.is_some(),
                     slow: b.sl.is_some(),
-                    tower_i: self.towers[ti].i,
                     tower_slot: ti,
                 });
                 if spec.homing {
-                    self.enemies[ei].inc += damage
+                    self.enemies.inc[ei] += damage
                 }
             }
         }
-        let projectiles = std::mem::take(&mut self.projectiles);
-        let mut keep = Vec::with_capacity(projectiles.len());
-        for mut p in projectiles {
-            let Some(ei) = self.enemy_idx(p.target) else {
-                continue;
-            };
-            let (tx, ty) = (self.enemies[ei].x, self.enemies[ei].y);
+        std::mem::swap(&mut self.projectiles, &mut self.projectile_scratch);
+        self.projectiles.clear();
+        let mut processing = std::mem::take(&mut self.projectile_scratch);
+        for projectile_index in 0..processing.len() {
+            let mut p = processing.get(projectile_index);
+            let target_index = self.enemy_idx(p.target);
+            if let Some(ei) = target_index {
+                p.target_x = self.enemies.x[ei];
+                p.target_y = self.enemies.y[ei];
+            }
+            let (tx, ty) = (p.target_x, p.target_y);
             let (dx, dy) = (tx - p.x, ty - p.y);
-            let len = dx.hypot(dy);
+            // Match V8 Math.hypot's scaled two-term summation. Small rounding
+            // differences here change which simultaneous projectile gets the
+            // final hit and eventually cause oracle drift.
+            let scale = dx.abs().max(dy.abs());
+            let len = if scale == 0. {
+                0.
+            } else {
+                let ax = dx / scale;
+                let ay = dy / scale;
+                scale * (ax * ax + ay * ay).sqrt()
+            };
             let step = p.v * dt;
             if len <= step {
                 if p.splash > 0. {
-                    let ids: Vec<u64> = self
-                        .enemies
-                        .iter()
-                        .filter(|e| (e.x - tx).powi(2) + (e.y - ty).powi(2) <= p.splash * p.splash)
-                        .map(|e| e.id)
-                        .collect();
-                    for id in ids {
-                        if let Some(i) = self.enemy_idx(id) {
-                            self.damage(i, p.damage, p.pierce, true, p.tower_slot)
-                        }
+                    let splash = p.splash
+                        * if self.relics[9] {
+                            self.params.rules.doctrine_splash
+                        } else {
+                            1.
+                        };
+                    let mut hits = std::mem::take(&mut self.hit_scratch);
+                    hits.clear();
+                    assert!(
+                        self.enemies.len() <= hits.capacity(),
+                        "hit scratch exhausted"
+                    );
+                    hits.extend((0..self.enemies.len()).filter(|&i| {
+                        (self.enemies.x[i] - tx).powi(2) + (self.enemies.y[i] - ty).powi(2)
+                            <= splash * splash
+                    }));
+                    for &i in &hits {
+                        self.damage(i, p.damage, p.pierce, true, p.tower_slot)
                     }
+                    self.hit_scratch = hits;
                     if let Some(i) = self.enemy_idx(p.target) {
-                        self.enemies[i].inc -= p.damage
+                        self.enemies.inc[i] -= p.damage
                     }
-                } else if self.enemies[ei].hp > 0. && !self.enemies[ei].leaked {
+                } else if let Some(ei) =
+                    target_index.filter(|&i| self.enemies.hp[i] > 0. && !self.enemies.leaked[i])
+                {
                     self.damage(ei, p.damage, p.pierce, false, p.tower_slot)
                 }
-                if let Some(i) = self.enemy_idx(p.target) {
-                    if p.kb > 0. && self.enemies[i].hp > 0. {
-                        self.enemies[i].d = (self.enemies[i].d
-                            - p.kb * (if self.enemies[i].boss { 0.15 } else { 1. }))
+                if let Some(i) = target_index {
+                    if p.kb > 0. && self.enemies.hp[i] > 0. {
+                        self.enemies.d[i] = (self.enemies.d[i]
+                            - p.kb
+                                * if self.relics[6] {
+                                    self.params.rules.doctrine_knockback
+                                } else {
+                                    1.
+                                }
+                                * (if self.enemies.boss[i] {
+                                    if self.relics[6] {
+                                        self.params.rules.doctrine_boss_knockback
+                                    } else {
+                                        0.15
+                                    }
+                                } else {
+                                    1.
+                                }))
                         .max(0.)
                     }
-                    if p.burn > 0. && self.enemies[i].hp > 0. {
-                        self.enemies[i].burn_t = 3.;
-                        self.enemies[i].burn_n = (self.enemies[i].burn_n + 1.).min(5.);
-                        self.enemies[i].burn_p = self.enemies[i].burn_p.max(p.burn)
+                    if p.burn > 0. && self.enemies.hp[i] > 0. {
+                        self.enemies.burn_t[i] = 3.;
+                        self.enemies.burn_n[i] =
+                            (self.enemies.burn_n[i] + 1.).min(if self.relics[0] {
+                                self.params.rules.doctrine_burn_cap
+                            } else {
+                                self.params.rules.burn_cap
+                            });
+                        self.enemies.burn_p[i] = self.enemies.burn_p[i].max(p.burn)
                     }
-                    if p.irr && self.enemies[i].hp > 0. {
-                        self.enemies[i].irr = 0.5
+                    if p.irr && self.enemies.hp[i] > 0. {
+                        self.enemies.irr[i] = if self.relics[10] {
+                            self.params.rules.doctrine_irradiate
+                        } else {
+                            0.5
+                        }
                     }
-                    if p.slow && self.enemies[i].hp > 0. && self.enemies[i].slow < 0.2 {
-                        self.enemies[i].slow = 0.5;
-                        self.enemies[i].slow_f = 0.6
+                    if p.slow && self.enemies.hp[i] > 0. && self.enemies.slow[i] < 0.2 {
+                        self.enemies.slow[i] = 0.5;
+                        self.enemies.slow_f[i] = 0.6
                     }
                 }
             } else {
                 p.x += dx / len * step;
                 p.y += dy / len * step;
-                keep.push(p)
+                self.projectiles.push(p)
             }
         }
-        self.projectiles = keep;
+        processing.clear();
+        self.projectile_scratch = processing;
         let plen = (self.path.len() - 1) as f64;
         for ei in 0..self.enemies.len() {
-            let e = &mut self.enemies[ei];
-            if e.dash {
-                e.dc -= dt;
-                if e.dc <= 0. {
-                    e.dc += 2.5
+            if self.enemies.dash[ei] {
+                self.enemies.dc[ei] -= dt;
+                if self.enemies.dc[ei] <= 0. {
+                    self.enemies.dc[ei] += 2.5
                 }
             }
-            let sm = (if e.dash && e.dc < 0.6 { 2.4 } else { 1. })
-                * (if e.slow > 0. { e.slow_f } else { 1. });
-            e.slow -= dt;
-            e.irr -= dt;
-            e.d += e.speed * sm * dt;
-            if e.regen > 0. && e.hp > 0. && e.hp < e.max {
-                e.hp = (e.hp + e.regen * dt).min(e.max)
+            let sm = (if self.enemies.dash[ei] && self.enemies.dc[ei] < 0.6 {
+                2.4
+            } else {
+                1.
+            }) * (if self.enemies.slow[ei] > 0. {
+                self.enemies.slow_f[ei]
+            } else {
+                1.
+            });
+            self.enemies.slow[ei] -= dt;
+            self.enemies.irr[ei] -= dt;
+            self.enemies.d[ei] += self.enemies.speed[ei] * sm * dt;
+            if self.enemies.regen[ei] > 0.
+                && self.enemies.hp[ei] > 0.
+                && self.enemies.hp[ei] < self.enemies.max[ei]
+            {
+                self.enemies.hp[ei] =
+                    (self.enemies.hp[ei] + self.enemies.regen[ei] * dt).min(self.enemies.max[ei])
             }
-            if e.burn_t > 0. {
-                let d = 4. * e.burn_n * e.burn_p * (if e.irr > 0. { 2.4 } else { 1. }) * dt;
-                e.hp -= d;
-                e.burn_t -= dt;
-                if e.burn_t <= 0. {
-                    e.burn_n = 0.
+            if self.enemies.burn_t[ei] > 0. {
+                let d = 4.
+                    * self.enemies.burn_n[ei]
+                    * self.enemies.burn_p[ei]
+                    * (if self.enemies.irr[ei] > 0. { 2.4 } else { 1. })
+                    * dt;
+                self.enemies.hp[ei] -= d;
+                self.enemies.burn_t[ei] -= dt;
+                if self.enemies.burn_t[ei] <= 0. {
+                    self.enemies.burn_n[ei] = 0.
                 }
             }
         }
         for i in 0..self.enemies.len() {
-            let p = self.pos(self.enemies[i].d.min(plen));
-            self.enemies[i].x = p.0;
-            self.enemies[i].y = p.1;
-            if self.enemies[i].d >= plen && !self.enemies[i].leaked {
-                self.enemies[i].leaked = true;
-                self.lives -= self.enemies[i].leak
+            let p = self.pos(self.enemies.d[i].min(plen));
+            self.enemies.x[i] = p.0;
+            self.enemies.y[i] = p.1;
+            if self.enemies.d[i] >= plen && !self.enemies.leaked[i] {
+                self.enemies.leaked[i] = true;
+                self.lives -= self.enemies.leak[i]
             }
         }
-        let dead: Vec<(Wave, f64, Option<f64>)> = self
-            .enemies
-            .iter()
-            .filter(|e| !e.leaked && e.hp <= 0. && e.split)
-            .flat_map(|e| {
-                [
-                    (e.row.clone(), (e.d - 0.6).max(0.), Some(0.4)),
-                    (e.row.clone(), (e.d - 1.2).max(0.), Some(0.4)),
-                ]
-            })
-            .collect();
-        for e in &self.enemies {
-            if !e.leaked && e.hp <= 0. {
-                self.gold += e.bounty;
+        // A JS projectile owns a reference to its target object. Update the
+        // retained snapshot after enemy movement so, if that enemy is removed
+        // below, the projectile still flies to the object's true final point.
+        let enemies = &self.enemies;
+        for projectile in 0..self.projectiles.len() {
+            if let Some(i) = enemies
+                .id
+                .iter()
+                .position(|&id| id == self.projectiles.target[projectile])
+            {
+                self.projectiles.target_x[projectile] = enemies.x[i];
+                self.projectiles.target_y[projectile] = enemies.y[i];
+            }
+        }
+        let mut dead = std::mem::take(&mut self.split_scratch);
+        dead.clear();
+        assert!(
+            self.enemies.len().saturating_mul(2) <= dead.capacity(),
+            "split scratch exhausted"
+        );
+        for i in (0..self.enemies.len()).filter(|&i| {
+            !self.enemies.leaked[i] && self.enemies.hp[i] <= 0. && self.enemies.split[i]
+        }) {
+            dead.push((
+                self.enemies.row[i].clone(),
+                (self.enemies.d[i] - 0.6).max(0.),
+                Some(0.4),
+            ));
+            dead.push((
+                self.enemies.row[i].clone(),
+                (self.enemies.d[i] - 1.2).max(0.),
+                Some(0.4),
+            ));
+        }
+        for i in 0..self.enemies.len() {
+            if !self.enemies.leaked[i] && self.enemies.hp[i] <= 0. {
+                self.gold += self.enemies.bounty[i]
+                    + if self.relics[1] {
+                        self.params.rules.doctrine_bounty
+                    } else {
+                        0.
+                    };
                 self.kills += 1
             }
         }
-        self.enemies.retain(|e| !e.leaked && e.hp > 0.);
-        for (drow, d, f) in dead {
+        self.enemies.retain_alive();
+        for (drow, d, f) in dead.drain(..) {
             self.spawn_enemy(drow, d, f)
         }
+        self.split_scratch = dead;
         if self.lives <= 0 {
             self.over = true;
             self.won = false;
@@ -1436,12 +2193,23 @@ impl Sim {
             return;
         }
         if self.phase_wave && self.spawns.is_empty() && self.enemies.is_empty() {
-            if self.wave >= 50 {
+            if self.wave >= 50 && !self.endless {
                 self.over = true;
                 self.won = true;
                 self.phase_wave = false
             } else {
-                self.phase_wave = false
+                self.phase_wave = false;
+                if self.wave.is_multiple_of(10) {
+                    let mut sd = self.wave * 7 + self.map * 3;
+                    let available = self.relics.iter().filter(|&&x| !x).count();
+                    while self.pick.len() < 3 && self.pick.len() < available {
+                        let r = sd % 12;
+                        sd += 1;
+                        if !self.relics[r] && !self.pick.contains(&r) {
+                            self.pick.push(r);
+                        }
+                    }
+                }
             }
         }
     }
@@ -1473,66 +2241,62 @@ impl Sim {
     }
 }
 
-fn fusion_mod(i: usize) -> Modifiers {
-    match i {
-        0 => Modifiers {
-            dm: Some(2.),
-            sp: Some(1.4),
-            bu: Some(1.),
-            bum: Some(2.),
-            ..Default::default()
-        },
-        1 => Modifiers {
-            dm: Some(2.),
-            pi: Some(1.),
-            kb: Some(1.1),
-            ..Default::default()
-        },
-        2 => Modifiers {
-            dm: Some(1.2),
-            ir: Some(1.),
-            ..Default::default()
-        },
-        3 => Modifiers {
-            dm: Some(1.5),
-            hc: Some(12.),
-            sl: Some(1.),
-            ..Default::default()
-        },
-        4 => Modifiers {
-            dm: Some(1.15),
-            hr: Some(1.5),
-            ir: Some(1.),
-            ..Default::default()
-        },
-        _ => Default::default(),
-    }
-}
 fn round6(x: f64) -> f64 {
     (x * 1_000_000.).round() / 1_000_000.
 }
 
+fn apply_matching_actions(
+    sim: &mut Sim,
+    pending: &mut Vec<Action>,
+    rejected: &mut Vec<Action>,
+    mut due: impl FnMut(&Action) -> bool,
+) {
+    let mut index = 0;
+    while index < pending.len() {
+        if due(&pending[index]) {
+            let action = pending.remove(index);
+            if !sim.apply(&action) {
+                rejected.push(action);
+            }
+        } else {
+            index += 1;
+        }
+    }
+}
+
 pub fn run(input: &Input, params: Params) -> RunResult {
     let mut sim = Sim::new(params, input.map);
+    sim.endless = input.endless;
+    sim.apply_initial(input.initial.as_ref());
     let mut pending = input.actions.clone();
-    pending.sort_by_key(|a| a.wave);
+    pending.sort_by_key(|a| (a.wave, a.tick.unwrap_or(0)));
     let mut rejected = vec![];
     let mut trace = vec![];
     let mut ticks = 0usize;
     while !sim.over && sim.wave < input.max_wave && ticks < 3_000_000 {
-        while pending.first().is_some_and(|a| a.wave <= sim.wave) {
-            let a = pending.remove(0);
-            if !sim.apply(&a) {
-                rejected.push(a)
-            }
+        let current_wave = sim.wave;
+        apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+            action.wave <= current_wave && action.tick.is_none() && action.op == "relic"
+        });
+        if !sim.pick.is_empty() {
+            sim.choose_relic(input.seed);
         }
+        apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+            action.wave <= current_wave && action.tick.is_none() && action.op != "relic"
+        });
         if !sim.phase_wave {
             sim.start_wave()
         }
         let started = sim.t;
+        let mut wave_tick = 0u32;
         while sim.phase_wave && !sim.over && ticks < 3_000_000 {
+            let current_wave = sim.wave;
+            apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+                action.wave <= current_wave && action.tick.is_some_and(|tick| tick <= wave_tick)
+            });
             sim.update(DT);
-            ticks += 1
+            ticks += 1;
+            wave_tick += 1;
         }
         trace.push(sim.trace(sim.t - started));
     }
@@ -1548,14 +2312,103 @@ pub fn run(input: &Input, params: Params) -> RunResult {
     }
 }
 
+pub fn debug_wave(input: &Input, target_wave: usize, params: Params) -> Vec<DebugTick> {
+    let mut sim = Sim::new(params, input.map);
+    sim.endless = input.endless;
+    sim.apply_initial(input.initial.as_ref());
+    let mut pending = input.actions.clone();
+    pending.sort_by_key(|a| (a.wave, a.tick.unwrap_or(0)));
+    let mut rejected = vec![];
+    while !sim.over && sim.wave < target_wave.saturating_sub(1) {
+        let current_wave = sim.wave;
+        apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+            action.wave <= current_wave && action.tick.is_none() && action.op == "relic"
+        });
+        if !sim.pick.is_empty() {
+            sim.choose_relic(input.seed);
+        }
+        apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+            action.wave <= current_wave && action.tick.is_none() && action.op != "relic"
+        });
+        sim.start_wave();
+        let mut wave_tick = 0u32;
+        while sim.phase_wave && !sim.over {
+            let current_wave = sim.wave;
+            apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+                action.wave <= current_wave && action.tick.is_some_and(|tick| tick <= wave_tick)
+            });
+            sim.update(DT);
+            wave_tick += 1;
+        }
+    }
+    if sim.over {
+        return vec![];
+    }
+    let current_wave = sim.wave;
+    apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+        action.wave <= current_wave && action.tick.is_none() && action.op == "relic"
+    });
+    if !sim.pick.is_empty() {
+        sim.choose_relic(input.seed);
+    }
+    apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+        action.wave <= current_wave && action.tick.is_none() && action.op != "relic"
+    });
+    sim.start_wave();
+    let mut out = vec![];
+    let mut tick = 0;
+    while sim.phase_wave && !sim.over {
+        let current_wave = sim.wave;
+        apply_matching_actions(&mut sim, &mut pending, &mut rejected, |action| {
+            action.wave <= current_wave && action.tick.is_some_and(|at| at as usize <= tick)
+        });
+        sim.update(DT);
+        tick += 1;
+        out.push(DebugTick {
+            tick,
+            gold: sim.gold,
+            lives: sim.lives,
+            kills: sim.kills,
+            enemies: (0..sim.enemies.len())
+                .map(|i| {
+                    (
+                        sim.enemies.d[i],
+                        sim.enemies.hp[i],
+                        sim.enemies.x[i],
+                        sim.enemies.y[i],
+                    )
+                })
+                .collect(),
+            projectiles: (0..sim.projectiles.len())
+                .map(|i| {
+                    (
+                        sim.projectiles.x[i],
+                        sim.projectiles.y[i],
+                        sim.enemy_idx(sim.projectiles.target[i])
+                            .unwrap_or(usize::MAX),
+                        sim.projectiles.tower_slot[i],
+                    )
+                })
+                .collect(),
+            tower_damage: sim.towers.iter().map(|t| t.damage).collect(),
+        });
+    }
+    out
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Genome {
     pub tower_weights: [f64; 10],
     pub upgrade_weight: f64,
     pub branch_bias: f64,
     pub merge_weight: f64,
-    pub fusion_weights: [f64; 5],
-    pub placement: [f64; 4],
+    pub fusion_weights: [f64; 6],
+    pub placement: [f64; 5],
+    pub doctrine_weights: [f64; 12],
+    pub power_weights: [f64; 3],
+    pub power_ticks: [u32; 3],
+    pub early_call_weight: f64,
+    pub early_call_tick: u32,
     pub reaction_ticks: u32,
     pub apm: f64,
 }
@@ -1565,24 +2418,90 @@ impl Genome {
         for x in &mut w {
             *x = rng.next_f64() * 2. - 1.
         }
-        let mut fusion_weights = [0.; 5];
+        let mut fusion_weights = [0.; 6];
         for x in &mut fusion_weights {
             *x = rng.next_f64() * 2. - 1.
         }
+        let mut doctrine_weights = [0.; 12];
+        for weight in &mut doctrine_weights {
+            *weight = rng.next_f64() * 2. - 1.;
+        }
+        let mut power_weights = [0.; 3];
+        for weight in &mut power_weights {
+            *weight = rng.next_f64() * 2. - 1.;
+        }
         Self {
             tower_weights: w,
-            upgrade_weight: rng.next_f64() * 2. - 1.,
+            upgrade_weight: rng.next_f64() * 1.5 - 0.25,
             branch_bias: rng.next_f64() * 2. - 1.,
-            merge_weight: rng.next_f64() * 2. - 1.,
+            merge_weight: rng.next_f64() - 0.5,
             fusion_weights,
             placement: [
                 rng.next_f64(),
                 rng.next_f64(),
                 rng.next_f64(),
                 rng.next_f64(),
+                rng.next_f64(),
             ],
-            reaction_ticks: (rng.next_u64() % 91) as u32,
-            apm: 10. + rng.next_f64() * 110.,
+            doctrine_weights,
+            power_weights,
+            power_ticks: [90, 45, 15].map(|base| base + (rng.next_u64() % 91) as u32),
+            early_call_weight: rng.next_f64() * 2. - 1.,
+            early_call_tick: 240 + (rng.next_u64() % 481) as u32,
+            reaction_ticks: (rng.next_u64() % 31) as u32,
+            apm: 35. + rng.next_f64() * 85.,
+        }
+    }
+
+    pub fn to_vector(&self) -> Vec<f64> {
+        let mut vector = Vec::with_capacity(46);
+        vector.extend(self.tower_weights);
+        vector.extend([self.upgrade_weight, self.branch_bias, self.merge_weight]);
+        vector.extend(self.fusion_weights);
+        vector.extend(self.placement);
+        vector.extend(self.doctrine_weights);
+        vector.extend(self.power_weights);
+        vector.extend(self.power_ticks.map(|tick| tick as f64));
+        vector.extend([
+            self.early_call_weight,
+            self.early_call_tick as f64,
+            self.reaction_ticks as f64,
+            self.apm,
+        ]);
+        vector
+    }
+
+    pub fn from_vector(vector: &[f64]) -> Self {
+        assert_eq!(vector.len(), 46);
+        let mut values = vector.iter().copied();
+        let tower_weights = std::array::from_fn(|_| values.next().unwrap());
+        let upgrade_weight = values.next().unwrap();
+        let branch_bias = values.next().unwrap();
+        let merge_weight = values.next().unwrap();
+        let fusion_weights = std::array::from_fn(|_| values.next().unwrap());
+        let placement = std::array::from_fn(|_| values.next().unwrap());
+        let doctrine_weights = std::array::from_fn(|_| values.next().unwrap());
+        let power_weights = std::array::from_fn(|_| values.next().unwrap());
+        let power_ticks =
+            std::array::from_fn(|_| values.next().unwrap().round().clamp(0., 1800.) as u32);
+        let early_call_weight = values.next().unwrap();
+        let early_call_tick = values.next().unwrap().round().clamp(30., 1800.) as u32;
+        let reaction_ticks = values.next().unwrap().round().clamp(0., 90.) as u32;
+        let apm = values.next().unwrap().clamp(10., 180.);
+        Self {
+            tower_weights,
+            upgrade_weight,
+            branch_bias,
+            merge_weight,
+            fusion_weights,
+            placement,
+            doctrine_weights,
+            power_weights,
+            power_ticks,
+            early_call_weight,
+            early_call_tick,
+            reaction_ticks,
+            apm,
         }
     }
 }
@@ -1591,8 +2510,12 @@ impl Genome {
 pub struct PolicyRun {
     pub run: RunResult,
     pub actions: Vec<Action>,
-    pub fusion_counts: [usize; 5],
+    pub fusion_counts: [usize; 6],
     pub tower_counts: [usize; 10],
+    pub branch_counts: [[usize; 2]; 10],
+    pub doctrine_counts: [usize; 12],
+    pub power_counts: [usize; 3],
+    pub early_calls: usize,
     pub merges: usize,
 }
 
@@ -1607,44 +2530,74 @@ pub fn run_policy(
     params: Params,
 ) -> PolicyRun {
     let mut sim = Sim::new(params, map);
+    sim.endless = max_wave > 50;
     let cells = placement_cells(map, genome.placement);
     let mut actions = vec![];
     let mut trace = vec![];
-    let mut fusion_counts = [0usize; 5];
+    let mut fusion_counts = [0usize; 6];
     let mut tower_counts = [0usize; 10];
+    let mut branch_counts = [[0usize; 2]; 10];
+    let mut doctrine_counts = [0usize; 12];
+    let mut power_counts = [0usize; 3];
+    let mut early_calls = 0usize;
     let mut merges = 0;
     let mut ticks = 0usize;
-    let recipes = [
-        (1usize, 3usize, 2u8),
-        (2, 4, 2),
-        (6, 7, 2),
-        (5, 8, 2),
-        (9, 7, 3),
-    ];
+    let recipes = sim.params.fusions.clone();
 
     while !sim.over && sim.wave < max_wave && ticks < 3_000_000 {
-        let action_cap = ((genome.apm * 3. / 60.).floor() as usize).max(1);
-        let _human_reaction_seconds = genome.reaction_ticks as f64 * DT;
+        if !sim.pick.is_empty() {
+            let relic = *sim
+                .pick
+                .iter()
+                .max_by(|&&a, &&b| {
+                    genome.doctrine_weights[a].total_cmp(&genome.doctrine_weights[b])
+                })
+                .unwrap();
+            let action = Action {
+                wave: sim.wave,
+                tick: None,
+                op: "relic".into(),
+                tower: relic,
+                x: 0,
+                y: 0,
+                branch: 0,
+                with: None,
+            };
+            if sim.apply(&action) {
+                doctrine_counts[relic] += 1;
+                actions.push(action);
+            }
+        }
+        let decision_window = (3. - genome.reaction_ticks as f64 * DT).max(0.);
+        let action_cap = (genome.apm * decision_window / 60.).floor() as usize;
         for _ in 0..action_cap {
             let unlocked = sim.age();
-            let preferred_fusion = (0..5)
-                .filter(|&r| recipes[r].0 <= unlocked && recipes[r].1 <= unlocked)
+            let preferred_fusion = (0..6)
+                .filter(|&r| r == 5 || (recipes[r].a <= unlocked && recipes[r].b <= unlocked))
                 .max_by(|&a, &b| genome.fusion_weights[a].total_cmp(&genome.fusion_weights[b]));
             let mut next: Option<Action> = None;
 
             if let Some(r) = preferred_fusion.filter(|&r| genome.fusion_weights[r] > 0.) {
-                let (a, b, level) = recipes[r];
+                let FusionSpec { a, b, level, .. } = recipes[r].clone();
                 'pairs: for i in 0..sim.towers.len() {
                     for j in i + 1..sim.towers.len() {
                         let t = &sim.towers[i];
                         let p = &sim.towers[j];
+                        let matches = if r == 5 {
+                            t.i == p.i && t.branch == p.branch
+                        } else {
+                            (t.i == a && p.i == b) || (t.i == b && p.i == a)
+                        };
                         if t.level >= level
                             && p.level >= level
-                            && ((t.i == a && p.i == b) || (t.i == b && p.i == a))
+                            && t.fusion.is_none()
+                            && p.fusion.is_none()
+                            && matches
                             && (t.x - p.x).abs().max((t.y - p.y).abs()) == 1
                         {
                             next = Some(Action {
                                 wave: sim.wave,
+                                tick: None,
                                 op: "fuse".into(),
                                 tower: 0,
                                 x: t.x,
@@ -1656,12 +2609,13 @@ pub fn run_policy(
                         }
                     }
                 }
-                if next.is_none() {
+                if next.is_none() && r != 5 {
                     for &kind in &[a, b] {
                         if let Some(t) = sim.towers.iter().find(|t| t.i == kind && t.level < level)
                         {
                             next = Some(Action {
                                 wave: sim.wave,
+                                tick: None,
                                 op: "upgrade".into(),
                                 tower: 0,
                                 x: t.x,
@@ -1692,15 +2646,11 @@ pub fn run_policy(
                                         && sim.tower_at(x, y).is_none()
                                 })
                         })
-                        .or_else(|| {
-                            cells
-                                .iter()
-                                .copied()
-                                .find(|&(x, y)| sim.tower_at(x, y).is_none())
-                        });
+                        .or_else(|| policy_cell(&sim, &cells, genome.placement[4]));
                     if let Some((x, y)) = cell {
                         next = Some(Action {
                             wave: sim.wave,
+                            tick: None,
                             op: "place".into(),
                             tower: kind,
                             x,
@@ -1726,6 +2676,7 @@ pub fn run_policy(
                         {
                             next = Some(Action {
                                 wave: sim.wave,
+                                tick: None,
                                 op: "merge".into(),
                                 tower: 0,
                                 x: t.x,
@@ -1746,6 +2697,7 @@ pub fn run_policy(
                 {
                     next = Some(Action {
                         wave: sim.wave,
+                        tick: None,
                         op: "upgrade".into(),
                         tower: 0,
                         x: t.x,
@@ -1760,6 +2712,7 @@ pub fn run_policy(
                 {
                     next = Some(Action {
                         wave: sim.wave,
+                        tick: None,
                         op: "branch".into(),
                         tower: 0,
                         x: t.x,
@@ -1773,13 +2726,10 @@ pub fn run_policy(
                 let kind = (0..=unlocked)
                     .max_by(|&a, &b| genome.tower_weights[a].total_cmp(&genome.tower_weights[b]))
                     .unwrap();
-                if let Some((x, y)) = cells
-                    .iter()
-                    .copied()
-                    .find(|&(x, y)| sim.tower_at(x, y).is_none())
-                {
+                if let Some((x, y)) = policy_cell(&sim, &cells, genome.placement[4]) {
                     next = Some(Action {
                         wave: sim.wave,
+                        tick: None,
                         op: "place".into(),
                         tower: kind,
                         x,
@@ -1797,10 +2747,15 @@ pub fn run_policy(
                 if a.op == "merge" {
                     merges += 1
                 }
-                if a.op == "fuse" {
-                    if let Some(r) = preferred_fusion {
-                        fusion_counts[r] += 1
-                    }
+                if a.op == "branch"
+                    && let Some(tower) = sim.tower_at(a.x, a.y).map(|index| sim.towers[index].i)
+                {
+                    branch_counts[tower][a.branch.saturating_sub(1).min(1) as usize] += 1
+                }
+                if a.op == "fuse"
+                    && let Some(r) = preferred_fusion
+                {
+                    fusion_counts[r] += 1
                 }
                 actions.push(a);
             } else {
@@ -1808,10 +2763,54 @@ pub fn run_policy(
             }
         }
         sim.start_wave();
+        let scheduled_wave = sim.wave;
+        let (meteor_x, meteor_y) = sim.path[sim.path.len() / 2];
+        let mut timed_actions: Vec<Action> = (0..3)
+            .filter(|&power| genome.power_weights[power] > 0.)
+            .map(|power| Action {
+                wave: scheduled_wave,
+                tick: Some(genome.power_ticks[power]),
+                op: "power".into(),
+                tower: power,
+                x: meteor_x,
+                y: meteor_y,
+                branch: 0,
+                with: None,
+            })
+            .collect();
+        if genome.early_call_weight > 0. && scheduled_wave < max_wave {
+            timed_actions.push(Action {
+                wave: scheduled_wave,
+                tick: Some(genome.early_call_tick),
+                op: "early".into(),
+                tower: 0,
+                x: 0,
+                y: 0,
+                branch: 0,
+                with: None,
+            });
+        }
+        timed_actions.sort_by_key(|action| action.tick.unwrap_or(0));
         let started = sim.t;
+        let mut wave_tick = 0u32;
         while sim.phase_wave && !sim.over && ticks < 3_000_000 {
+            while timed_actions
+                .first()
+                .is_some_and(|action| action.tick.is_some_and(|at| at <= wave_tick))
+            {
+                let action = timed_actions.remove(0);
+                if sim.apply(&action) {
+                    if action.op == "power" {
+                        power_counts[action.tower] += 1;
+                    } else if action.op == "early" {
+                        early_calls += 1;
+                    }
+                    actions.push(action);
+                }
+            }
             sim.update(DT);
-            ticks += 1
+            ticks += 1;
+            wave_tick += 1;
         }
         trace.push(sim.trace(sim.t - started));
     }
@@ -1830,6 +2829,10 @@ pub fn run_policy(
         actions,
         fusion_counts,
         tower_counts,
+        branch_counts,
+        doctrine_counts,
+        power_counts,
+        early_calls,
         merges,
     }
 }
@@ -1868,7 +2871,7 @@ impl Xoshiro {
     }
 }
 
-pub fn placement_cells(map: usize, weights: [f64; 4]) -> Vec<(i32, i32)> {
+pub fn placement_cells(map: usize, weights: [f64; 5]) -> Vec<(i32, i32)> {
     let sim = Sim::new(Params::default(), map);
     let mut out = vec![];
     for y in 0..H {
@@ -1902,6 +2905,32 @@ pub fn placement_cells(map: usize, weights: [f64; 4]) -> Vec<(i32, i32)> {
     out.into_iter().map(|(_, x, y)| (x, y)).collect()
 }
 
+fn policy_cell(sim: &Sim, cells: &[(i32, i32)], adjacency_weight: f64) -> Option<(i32, i32)> {
+    cells
+        .iter()
+        .enumerate()
+        .filter(|item| {
+            let (x, y) = *item.1;
+            sim.tower_at(x, y).is_none()
+        })
+        .map(|(rank, &(x, y))| {
+            let support_neighbors = sim
+                .towers
+                .iter()
+                .filter(|tower| {
+                    [3, 7, 8].contains(&tower.i)
+                        && (tower.x - x).abs().max((tower.y - y).abs()) == 1
+                })
+                .count() as f64;
+            (
+                -(rank as f64) + adjacency_weight * support_neighbors * 20.,
+                (x, y),
+            )
+        })
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, cell)| cell)
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Elite {
     pub fitness: f64,
@@ -1913,5 +2942,53 @@ pub struct Elite {
     pub genome: Genome,
     pub seed: u64,
     pub actions: Vec<Action>,
+    pub clear_times: Vec<f64>,
+    pub tower_counts: [usize; 10],
+    pub branch_counts: [[usize; 2]; 10],
+    pub fusion_counts: [usize; 6],
+    pub doctrine_counts: [usize; 12],
+    pub power_counts: [usize; 3],
+    pub early_calls: usize,
+    pub tower_damage: [f64; 10],
 }
 pub type Archive = BTreeMap<(usize, bool, Option<usize>), Elite>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn core_is_seed_deterministic() {
+        let input = Input {
+            seed: 42,
+            map: 0,
+            max_wave: 5,
+            actions: vec![],
+            params: None,
+            initial: None,
+            endless: false,
+        };
+        let a = run(&input, Params::default());
+        let b = run(&input, Params::default());
+        assert_eq!(a.trace, b.trace);
+    }
+
+    #[test]
+    fn policy_is_seed_deterministic() {
+        let mut rng = Xoshiro::new(9);
+        let genome = Genome::random(&mut rng);
+        let a = run_policy(&genome, 123, 1, 12, Params::default());
+        let b = run_policy(&genome, 123, 1, 12, Params::default());
+        assert_eq!(a.run.trace, b.run.trace);
+        assert_eq!(a.actions.len(), b.actions.len());
+    }
+
+    #[test]
+    fn parameters_round_trip() {
+        let params = Params::default();
+        let json = serde_json::to_string(&params).unwrap();
+        let restored: Params = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.towers.len(), 10);
+        assert_eq!(restored.constants.growth, 1.12);
+    }
+}

@@ -1,9 +1,10 @@
 # EPOCH Balance Lab — design brief
 
-A proposal for turning balance from hand-tuning into search: a fast deterministic
-core, a realistic parameterized player, and two coupled optimizers that evolve
-players to break the game and evolve the game to resist. Written to be handed to
-another agent to build. Nothing here is built yet.
+A design for turning balance from hand-tuning into search: a deterministic core,
+a parameterized player, and coupled searches that evolve players to break the
+game and game constants to resist them. The working implementation and commands
+are in [`balance-lab/README.md`](balance-lab/README.md). That README also records
+the measured performance and the parts of this design that remain stretch work.
 
 ## Why
 
