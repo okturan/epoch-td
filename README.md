@@ -122,10 +122,15 @@ intervals, and uses a genetic search to find contexts that maximize each
 doctrine's effect. Common pre-intervention ticks execute once and are cloned.
 When the generated policy's natural run is exactly one paired arm, that result
 is reused too. The five-million count is therefore a logical output count, not
-five million independent full starts. Broad-corpus intervals summarize a fixed
-sample; genetic-search and finalist intervals are descriptive because candidate
-selection is adaptive. The full run is intentionally not part of CI; the
-structural smoke gate is.
+five million independent full starts. Each arm records whether it reached the
+3,000,000-tick execution limit. Those arms are reported as right-censored, and
+their clear time is excluded from clear-time deltas and intervals instead of
+being treated as a completed run. The GA uses the separate cap-transition metric
+when only one arm is censored. Broad-corpus intervals describe uncertainty under
+the declared seed-driven scenario generator and represented parameter ranges;
+genetic-search and finalist intervals are descriptive because candidate
+selection is adaptive. The report embeds the source revision. The full run is
+intentionally not part of CI; the structural smoke gate is.
 
 CI uses a pinned Rust 1.96.1 toolchain and runs formatting, unit, oracle, policy,
 browser, attacker, and defender gates. Generated Cargo output and local reports

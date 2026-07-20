@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const DT: f64 = 1.0 / 30.0;
+pub const EXECUTION_TICK_CAP: usize = 3_000_000;
 const W: i32 = 14;
 const H: i32 = 9;
 const LEVEL_MULTIPLIERS: [f64; 6] = [1., 1.5, 2.25, 3.375, 5.0625, 7.59375];
@@ -1327,6 +1328,8 @@ pub struct CounterfactualSummary {
     pub lives: i32,
     pub gold: f64,
     pub seconds: f64,
+    pub ticks: usize,
+    pub capped: bool,
     pub telemetry: Telemetry,
 }
 
@@ -2484,7 +2487,7 @@ fn advance_execution(
     intervention: Option<PerkIntervention>,
     stop_before_wave: Option<usize>,
 ) {
-    while !state.sim.over && state.sim.wave < input.max_wave && state.ticks < 3_000_000 {
+    while !state.sim.over && state.sim.wave < input.max_wave && state.ticks < EXECUTION_TICK_CAP {
         if stop_before_wave.is_some_and(|wave| state.sim.wave >= wave) {
             break;
         }
@@ -2515,7 +2518,7 @@ fn advance_execution(
         }
         let started = state.sim.t;
         let mut wave_tick = 0u32;
-        while state.sim.phase_wave && !state.sim.over && state.ticks < 3_000_000 {
+        while state.sim.phase_wave && !state.sim.over && state.ticks < EXECUTION_TICK_CAP {
             let current_wave = state.sim.wave;
             apply_matching_actions(
                 &mut state.sim,
@@ -2552,18 +2555,26 @@ fn finish_execution(state: ExecutionState, input: &Input) -> CounterfactualRun {
     CounterfactualRun { run, telemetry }
 }
 
-fn finish_summary(state: ExecutionState) -> CounterfactualSummary {
-    summarize(&state.sim, state.total_seconds)
+fn finish_summary(state: ExecutionState, max_wave: usize) -> CounterfactualSummary {
+    summarize(&state.sim, state.total_seconds, state.ticks, max_wave)
 }
 
-fn summarize(sim: &Sim, total_seconds: f64) -> CounterfactualSummary {
+fn summarize(
+    sim: &Sim,
+    total_seconds: f64,
+    ticks: usize,
+    max_wave: usize,
+) -> CounterfactualSummary {
     let mut telemetry = sim.telemetry.clone();
     telemetry.wasted_projectiles += sim.projectiles.len() as u64;
+    let completed = sim.over || (sim.wave >= max_wave && !sim.phase_wave);
     CounterfactualSummary {
         wave: sim.wave,
         lives: sim.lives,
         gold: round6(sim.gold),
         seconds: round6(total_seconds),
+        ticks,
+        capped: ticks >= EXECUTION_TICK_CAP && !completed,
         telemetry,
     }
 }
@@ -2683,7 +2694,10 @@ pub fn run_counterfactual_summary_pair(
         }),
         None,
     );
-    (finish_summary(off), finish_summary(on))
+    (
+        finish_summary(off, input.max_wave),
+        finish_summary(on, input.max_wave),
+    )
 }
 
 pub fn run_counterfactual_summary_batch(
@@ -2719,7 +2733,11 @@ pub fn run_counterfactual_summary_batch(
                 }),
                 None,
             );
-            (perk, finish_summary(off), finish_summary(on))
+            (
+                perk,
+                finish_summary(off, input.max_wave),
+                finish_summary(on, input.max_wave),
+            )
         })
         .collect()
 }
@@ -2744,7 +2762,7 @@ pub fn run_counterfactual_summary_pair_from_checkpoint(
             }),
             None,
         );
-        let counterfactual = finish_summary(counterfactual);
+        let counterfactual = finish_summary(counterfactual, input.max_wave);
         return if enabled {
             (counterfactual, baseline)
         } else {
@@ -2773,7 +2791,10 @@ pub fn run_counterfactual_summary_pair_from_checkpoint(
         }),
         None,
     );
-    (finish_summary(off), finish_summary(on))
+    (
+        finish_summary(off, input.max_wave),
+        finish_summary(on, input.max_wave),
+    )
 }
 
 pub fn run_counterfactual_summary_batch_from_checkpoint(
@@ -2799,7 +2820,7 @@ pub fn run_counterfactual_summary_batch_from_checkpoint(
                     }),
                     None,
                 );
-                let counterfactual = finish_summary(counterfactual);
+                let counterfactual = finish_summary(counterfactual, input.max_wave);
                 return if enabled {
                     (perk, counterfactual, baseline)
                 } else {
@@ -2828,7 +2849,11 @@ pub fn run_counterfactual_summary_batch_from_checkpoint(
                 }),
                 None,
             );
-            (perk, finish_summary(off), finish_summary(on))
+            (
+                perk,
+                finish_summary(off, input.max_wave),
+                finish_summary(on, input.max_wave),
+            )
         })
         .collect()
 }
@@ -3091,7 +3116,7 @@ fn run_policy_internal(
     let mut checkpoint = None;
     let recipes = sim.params.fusions.clone();
 
-    while !sim.over && sim.wave < max_wave && ticks < 3_000_000 {
+    while !sim.over && sim.wave < max_wave && ticks < EXECUTION_TICK_CAP {
         if checkpoint.is_none() && checkpoint_wave.is_some_and(|wave| sim.wave >= wave) {
             checkpoint = Some(CounterfactualCheckpoint {
                 state: ExecutionState {
@@ -3357,7 +3382,7 @@ fn run_policy_internal(
         timed_actions.sort_by_key(|action| action.tick.unwrap_or(0));
         let started = sim.t;
         let mut wave_tick = 0u32;
-        while sim.phase_wave && !sim.over && ticks < 3_000_000 {
+        while sim.phase_wave && !sim.over && ticks < EXECUTION_TICK_CAP {
             while timed_actions
                 .first()
                 .is_some_and(|action| action.tick.is_some_and(|at| at <= wave_tick))
@@ -3399,7 +3424,7 @@ fn run_policy_internal(
     }
     if let Some(checkpoint) = &mut checkpoint {
         checkpoint.final_relics = sim.relics;
-        checkpoint.baseline = Some(summarize(&sim, total_seconds));
+        checkpoint.baseline = Some(summarize(&sim, total_seconds, ticks, max_wave));
     }
     let result = RunResult {
         protocol: 1,
@@ -3546,6 +3571,16 @@ pub type Archive = BTreeMap<(usize, bool, Option<usize>), Elite>;
 mod tests {
     use super::*;
 
+    fn run_independent_counterfactual_summary(
+        input: &Input,
+        params: Params,
+        intervention: PerkIntervention,
+    ) -> CounterfactualSummary {
+        let mut state = ExecutionState::compact(input, params);
+        advance_execution(&mut state, input, Some(intervention), None);
+        finish_summary(state, input.max_wave)
+    }
+
     #[test]
     fn core_is_seed_deterministic() {
         let input = Input {
@@ -3686,6 +3721,67 @@ mod tests {
     }
 
     #[test]
+    fn shared_prefix_summaries_match_independent_runs_including_termination_evidence() {
+        let mut rng = Xoshiro::new(1_109);
+        let genome = Genome::random(&mut rng);
+        let seed = 81_109;
+        let policy = run_policy(&genome, seed, 1, 15, Params::default());
+        let input = Input {
+            seed,
+            map: 1,
+            max_wave: 15,
+            actions: policy.actions,
+            params: None,
+            initial: None,
+            endless: false,
+        };
+
+        for activation_wave in [0, 7, 20] {
+            for perk in [0, 8, 11] {
+                let expected_off = run_independent_counterfactual_summary(
+                    &input,
+                    Params::default(),
+                    PerkIntervention {
+                        perk,
+                        enabled: false,
+                        activation_wave,
+                    },
+                );
+                let expected_on = run_independent_counterfactual_summary(
+                    &input,
+                    Params::default(),
+                    PerkIntervention {
+                        perk,
+                        enabled: true,
+                        activation_wave,
+                    },
+                );
+                let (actual_off, actual_on) = run_counterfactual_summary_pair(
+                    &input,
+                    Params::default(),
+                    perk,
+                    activation_wave,
+                );
+
+                assert_eq!(actual_off.ticks, expected_off.ticks);
+                assert_eq!(actual_off.capped, expected_off.capped);
+                assert_eq!(actual_on.ticks, expected_on.ticks);
+                assert_eq!(actual_on.capped, expected_on.capped);
+                assert_eq!(
+                    serde_json::to_vec(&actual_off).unwrap(),
+                    serde_json::to_vec(&expected_off).unwrap(),
+                    "off summary mismatch perk={perk} activation={activation_wave}"
+                );
+                assert_eq!(
+                    serde_json::to_vec(&actual_on).unwrap(),
+                    serde_json::to_vec(&expected_on).unwrap(),
+                    "on summary mismatch perk={perk} activation={activation_wave}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn shared_prefix_batch_matches_individual_pairs() {
         let mut rng = Xoshiro::new(1_337);
         let genome = Genome::random(&mut rng);
@@ -3714,6 +3810,26 @@ mod tests {
                 serde_json::to_vec(&actual_on).unwrap(),
                 serde_json::to_vec(&expected_on).unwrap(),
                 "on mismatch perk={perk}"
+            );
+        }
+
+        let actual = run_counterfactual_summary_batch(&input, Params::default(), &perks, 7);
+        for (perk, actual_off, actual_on) in actual {
+            let (expected_off, expected_on) =
+                run_counterfactual_summary_pair(&input, Params::default(), perk, 7);
+            assert_eq!(actual_off.ticks, expected_off.ticks);
+            assert_eq!(actual_off.capped, expected_off.capped);
+            assert_eq!(actual_on.ticks, expected_on.ticks);
+            assert_eq!(actual_on.capped, expected_on.capped);
+            assert_eq!(
+                serde_json::to_vec(&actual_off).unwrap(),
+                serde_json::to_vec(&expected_off).unwrap(),
+                "off summary mismatch perk={perk}"
+            );
+            assert_eq!(
+                serde_json::to_vec(&actual_on).unwrap(),
+                serde_json::to_vec(&expected_on).unwrap(),
+                "on summary mismatch perk={perk}"
             );
         }
     }
@@ -3748,6 +3864,8 @@ mod tests {
                     assert_eq!(compact.lives, full.run.result.lives);
                     assert_eq!(compact.gold, full.run.result.gold);
                     assert_eq!(compact.seconds, full.run.result.seconds);
+                    assert!(compact.ticks > 0);
+                    assert!(!compact.capped);
                     assert_eq!(
                         serde_json::to_vec(&compact.telemetry).unwrap(),
                         serde_json::to_vec(&full.telemetry).unwrap()
@@ -3815,6 +3933,10 @@ mod tests {
                         activation_wave,
                         baseline_reusable,
                     );
+                    assert_eq!(actual.0.ticks, expected.0.ticks);
+                    assert_eq!(actual.0.capped, expected.0.capped);
+                    assert_eq!(actual.1.ticks, expected.1.ticks);
+                    assert_eq!(actual.1.capped, expected.1.capped);
                     assert_eq!(
                         serde_json::to_vec(&actual).unwrap(),
                         serde_json::to_vec(&expected).unwrap(),
@@ -3823,6 +3945,104 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn checkpoint_batches_match_replayed_batches_including_termination_evidence() {
+        let mut rng = Xoshiro::new(12_345);
+        let genome = Genome::random(&mut rng);
+        let seed = 212_345;
+        let activation_wave = 7;
+        let (policy, checkpoint) =
+            run_policy_with_checkpoint(&genome, seed, 2, 15, Params::default(), activation_wave);
+        let input = Input {
+            seed,
+            map: 2,
+            max_wave: 15,
+            actions: policy.actions,
+            params: None,
+            initial: None,
+            endless: false,
+        };
+        let perks: Vec<_> = (0..12).collect();
+        let expected =
+            run_counterfactual_summary_batch(&input, Params::default(), &perks, activation_wave);
+
+        let baseline = checkpoint.baseline.as_ref().unwrap();
+        assert!(baseline.ticks > 0);
+        assert!(!baseline.capped);
+
+        for reuse_baseline in [false, true] {
+            let actual = run_counterfactual_summary_batch_from_checkpoint(
+                &input,
+                &checkpoint,
+                &perks,
+                activation_wave,
+                reuse_baseline,
+            );
+            for ((perk, actual_off, actual_on), (expected_perk, expected_off, expected_on)) in
+                actual.iter().zip(&expected)
+            {
+                assert_eq!(perk, expected_perk);
+                assert_eq!(actual_off.ticks, expected_off.ticks);
+                assert_eq!(actual_off.capped, expected_off.capped);
+                assert_eq!(actual_on.ticks, expected_on.ticks);
+                assert_eq!(actual_on.capped, expected_on.capped);
+            }
+            assert_eq!(
+                serde_json::to_vec(&actual).unwrap(),
+                serde_json::to_vec(&expected).unwrap(),
+                "checkpoint batch mismatch reuse_baseline={reuse_baseline}"
+            );
+        }
+    }
+
+    #[test]
+    fn summaries_mark_only_unfinished_tick_limited_runs_as_capped() {
+        let input = Input {
+            seed: 501,
+            map: 0,
+            max_wave: 2,
+            actions: vec![],
+            params: None,
+            initial: None,
+            endless: false,
+        };
+        let state = ExecutionState::compact(&input, Params::default());
+
+        let mut below_cap = state.fork();
+        below_cap.ticks = EXECUTION_TICK_CAP - 1;
+        let below_cap = finish_summary(below_cap, input.max_wave);
+        assert_eq!(below_cap.ticks, EXECUTION_TICK_CAP - 1);
+        assert!(!below_cap.capped);
+
+        let mut at_cap = state.fork();
+        at_cap.ticks = EXECUTION_TICK_CAP;
+        let at_cap = finish_summary(at_cap, input.max_wave);
+        assert_eq!(at_cap.ticks, EXECUTION_TICK_CAP);
+        assert!(at_cap.capped);
+
+        let mut over_at_cap = state.fork();
+        over_at_cap.ticks = EXECUTION_TICK_CAP;
+        over_at_cap.sim.over = true;
+        assert!(!finish_summary(over_at_cap, input.max_wave).capped);
+
+        let mut max_wave_at_cap = state;
+        max_wave_at_cap.ticks = EXECUTION_TICK_CAP;
+        max_wave_at_cap.sim.wave = input.max_wave;
+        assert!(!finish_summary(max_wave_at_cap, input.max_wave).capped);
+
+        let mut final_wave_in_progress = ExecutionState::compact(&input, Params::default());
+        final_wave_in_progress.ticks = EXECUTION_TICK_CAP;
+        final_wave_in_progress.sim.wave = input.max_wave;
+        final_wave_in_progress.sim.phase_wave = true;
+        assert!(finish_summary(final_wave_in_progress, input.max_wave).capped);
+
+        let mut early_called_wave_in_progress = ExecutionState::compact(&input, Params::default());
+        early_called_wave_in_progress.ticks = EXECUTION_TICK_CAP;
+        early_called_wave_in_progress.sim.wave = input.max_wave + 1;
+        early_called_wave_in_progress.sim.phase_wave = true;
+        assert!(finish_summary(early_called_wave_in_progress, input.max_wave).capped);
     }
 
     #[test]

@@ -1320,7 +1320,7 @@ const PERK_NAMES: [&str; 12] = [
     "Fission Ammo",
     "Cold Snap",
 ];
-const EFFECT_METRICS: [&str; 10] = [
+const EFFECT_METRICS: [&str; 11] = [
     "survivalWave",
     "lives",
     "gold",
@@ -1331,7 +1331,16 @@ const EFFECT_METRICS: [&str; 10] = [
     "overkillDamage",
     "projectileLatencySeconds",
     "wastedProjectiles",
+    "tickCapReached",
 ];
+const CLEAR_SECONDS_METRIC: usize = 5;
+const MECHANICAL_METRICS: std::ops::Range<usize> = 6..10;
+const TICK_CAP_METRIC: usize = 10;
+// A one-arm cap transition is treated as the equivalent of ten survival waves.
+// This is finite so it can guide the GA without recreating the unbounded influence
+// of the censored ~100,000-second runtime that used to occupy clearSeconds.
+const CAP_TRANSITION_UTILITY_WEIGHT: f64 = 1_000.;
+const CAP_TRANSITION_OUTCOME_WEIGHT: f64 = 1_000.;
 const SPEED_LEVELS: [f64; 5] = [0.65, 0.82, 1.0, 1.18, 1.4];
 const RANGE_LEVELS: [f64; 5] = [0.75, 0.9, 1.0, 1.15, 1.3];
 const HP_LEVELS: [f64; 3] = [0.85, 1.0, 1.18];
@@ -1427,10 +1436,14 @@ struct PreparedSensitivity {
 
 #[derive(Clone)]
 struct EffectObservation {
-    metrics: [f64; 10],
+    metrics: [f64; 11],
     utility: f64,
     outcome_score: f64,
     mechanical_score: f64,
+    off_capped: bool,
+    on_capped: bool,
+    off_ticks: usize,
+    on_ticks: usize,
 }
 
 #[derive(Clone)]
@@ -1478,6 +1491,9 @@ impl Moment {
         (self.mean() - radius, self.mean() + radius)
     }
     fn json(&self) -> Value {
+        if self.n == 0 {
+            return json!({"mean":0.,"ci95":[0.,0.],"min":0.,"max":0.,"samples":0});
+        }
         let (low, high) = self.ci95();
         json!({"mean":self.mean(),"ci95":[low,high],"min":self.min,"max":self.max,"samples":self.n})
     }
@@ -1486,6 +1502,10 @@ impl Moment {
 #[derive(Clone)]
 struct EffectStats {
     pairs: u64,
+    pair_censored: u64,
+    off_capped: u64,
+    on_capped: u64,
+    cap_transition: u64,
     exact_zero: u64,
     outcome_changed: u64,
     mechanical_changed: u64,
@@ -1502,6 +1522,10 @@ impl EffectStats {
     fn new() -> Self {
         Self {
             pairs: 0,
+            pair_censored: 0,
+            off_capped: 0,
+            on_capped: 0,
+            cap_transition: 0,
             exact_zero: 0,
             outcome_changed: 0,
             mechanical_changed: 0,
@@ -1518,20 +1542,28 @@ impl EffectStats {
     fn push(&mut self, observation: &EffectObservation, context: SensitivityContext) {
         const EPS: f64 = 1e-9;
         self.pairs += 1;
+        self.pair_censored += u64::from(observation.off_capped || observation.on_capped);
+        self.off_capped += u64::from(observation.off_capped);
+        self.on_capped += u64::from(observation.on_capped);
+        self.cap_transition += u64::from(observation.off_capped != observation.on_capped);
         self.utility.push(observation.utility);
-        for (stats, value) in self.metrics.iter_mut().zip(observation.metrics) {
-            stats.push(value)
+        for (index, (stats, value)) in self.metrics.iter_mut().zip(observation.metrics).enumerate()
+        {
+            if index != CLEAR_SECONDS_METRIC || !(observation.off_capped || observation.on_capped) {
+                stats.push(value)
+            }
         }
         if observation.metrics.iter().all(|value| value.abs() <= EPS) {
             self.exact_zero += 1
         }
-        if observation.metrics[..6]
+        if observation.metrics[..CLEAR_SECONDS_METRIC + 1]
             .iter()
             .any(|value| value.abs() > EPS)
+            || observation.metrics[TICK_CAP_METRIC].abs() > EPS
         {
             self.outcome_changed += 1
         }
-        if observation.metrics[6..]
+        if observation.metrics[MECHANICAL_METRICS]
             .iter()
             .any(|value| value.abs() > EPS)
         {
@@ -1554,6 +1586,10 @@ impl EffectStats {
     }
     fn merge(&mut self, other: &Self) {
         self.pairs += other.pairs;
+        self.pair_censored += other.pair_censored;
+        self.off_capped += other.off_capped;
+        self.on_capped += other.on_capped;
+        self.cap_transition += other.cap_transition;
         self.exact_zero += other.exact_zero;
         self.outcome_changed += other.outcome_changed;
         self.mechanical_changed += other.mechanical_changed;
@@ -1575,6 +1611,10 @@ impl EffectStats {
     fn json(&self) -> Value {
         let outcome_change_ci = wilson95(self.outcome_changed, self.pairs);
         let mechanical_change_ci = wilson95(self.mechanical_changed, self.pairs);
+        let pair_censored_ci = wilson95(self.pair_censored, self.pairs);
+        let off_capped_ci = wilson95(self.off_capped, self.pairs);
+        let on_capped_ci = wilson95(self.on_capped, self.pairs);
+        let cap_transition_ci = wilson95(self.cap_transition, self.pairs);
         let metrics = EFFECT_METRICS
             .iter()
             .zip(&self.metrics)
@@ -1582,6 +1622,18 @@ impl EffectStats {
             .collect::<serde_json::Map<_, _>>();
         json!({
             "pairs":self.pairs,
+            "pairCensored":self.pair_censored,
+            "pairCensoredRate":self.pair_censored as f64/self.pairs.max(1) as f64,
+            "pairCensoredRateCi95":pair_censored_ci,
+            "offCapped":self.off_capped,
+            "offCappedRate":self.off_capped as f64/self.pairs.max(1) as f64,
+            "offCappedRateCi95":off_capped_ci,
+            "onCapped":self.on_capped,
+            "onCappedRate":self.on_capped as f64/self.pairs.max(1) as f64,
+            "onCappedRateCi95":on_capped_ci,
+            "capTransition":self.cap_transition,
+            "capTransitionRate":self.cap_transition as f64/self.pairs.max(1) as f64,
+            "capTransitionRateCi95":cap_transition_ci,
             "exactZeroRate":self.exact_zero as f64/self.pairs.max(1) as f64,
             "outcomeChangeRate":self.outcome_changed as f64/self.pairs.max(1) as f64,
             "outcomeChangeRateCi95":outcome_change_ci,
@@ -1664,6 +1716,7 @@ impl SensitivityAccumulator {
 fn broad_gene(seed: u64, index: usize) -> SensitivityGene {
     let mut rng = Xoshiro::new(seed ^ (index as u64).wrapping_mul(0x9e3779b97f4a7c15));
     let mut genome = Genome::random(&mut rng);
+    genome.reaction_ticks = (index % 91) as u32;
     let focus_tower = index % 10;
     for weight in &mut genome.tower_weights {
         *weight -= 0.75
@@ -1875,30 +1928,43 @@ fn evaluate_prepared_batch(
 }
 
 fn effect_observation(off: CounterfactualSummary, on: CounterfactualSummary) -> EffectObservation {
+    let off_capped = off.capped;
+    let on_capped = on.capped;
+    let off_ticks = off.ticks;
+    let on_ticks = on.ticks;
+    let clear_seconds = if off_capped || on_capped {
+        0.
+    } else {
+        on.seconds - off.seconds
+    };
+    let tick_cap_reached = u8::from(on_capped) as f64 - u8::from(off_capped) as f64;
     let metrics = [
         on.wave as f64 - off.wave as f64,
         on.lives as f64 - off.lives as f64,
         on.gold - off.gold,
         on.telemetry.leaks as f64 - off.telemetry.leaks as f64,
         on.telemetry.leak_damage as f64 - off.telemetry.leak_damage as f64,
-        on.seconds - off.seconds,
+        clear_seconds,
         on.telemetry.effective_damage - off.telemetry.effective_damage,
         on.telemetry.overkill_damage - off.telemetry.overkill_damage,
         mean_latency(&on.telemetry) - mean_latency(&off.telemetry),
         on.telemetry.wasted_projectiles as f64 - off.telemetry.wasted_projectiles as f64,
+        tick_cap_reached,
     ];
     let utility = metrics[0] * 100. + metrics[1] * 5. + metrics[2] * 0.02
         - metrics[3] * 2.
         - metrics[4] * 3.
         - metrics[5] * 0.05
         + metrics[6] * 0.001
-        - metrics[9] * 0.1;
+        - metrics[9] * 0.1
+        - metrics[TICK_CAP_METRIC] * CAP_TRANSITION_UTILITY_WEIGHT;
     let outcome_score = metrics[0].abs() * 100.
         + metrics[1].abs() * 10.
         + metrics[2].abs() * 0.01
         + metrics[3].abs() * 5.
         + metrics[4].abs() * 10.
-        + metrics[5].abs() * 0.1;
+        + metrics[5].abs() * 0.1
+        + metrics[TICK_CAP_METRIC].abs() * CAP_TRANSITION_OUTCOME_WEIGHT;
     let mechanical_score = metrics[6].abs() * 0.001
         + metrics[7].abs() * 0.001
         + metrics[8].abs() * 10.
@@ -1908,6 +1974,10 @@ fn effect_observation(off: CounterfactualSummary, on: CounterfactualSummary) -> 
         utility,
         outcome_score,
         mechanical_score,
+        off_capped,
+        on_capped,
+        off_ticks,
+        on_ticks,
     }
 }
 
@@ -1934,6 +2004,10 @@ fn sensitivity_example(
         "sellStrategy":context.sell_strategy,
         "sellSlot":context.sell_slot,
         "sellScheduled":context.sell_scheduled,
+        "offCapped":observation.off_capped,
+        "onCapped":observation.on_capped,
+        "offTicks":observation.off_ticks,
+        "onTicks":observation.on_ticks,
         "reactionTicks":context.reaction_ticks,
         "apm":context.apm,
         "context":context.json(),
@@ -2027,6 +2101,32 @@ fn sensitivity_screen_wave(perk: usize, default_wave: usize) -> usize {
     }
 }
 
+fn source_revision() -> String {
+    let root = env!("CARGO_MANIFEST_DIR").trim_end_matches("/balance-lab");
+    Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            let revision = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            (!revision.is_empty()).then_some(revision)
+        })
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn source_dirty() -> bool {
+    let root = env!("CARGO_MANIFEST_DIR").trim_end_matches("/balance-lab");
+    Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_none_or(|output| !output.stdout.is_empty())
+}
+
 fn sensitivity(args: &[String]) {
     let broad_scenarios = args
         .get(2)
@@ -2044,6 +2144,8 @@ fn sensitivity(args: &[String]) {
     let max_wave = args.get(6).and_then(|x| x.parse().ok()).unwrap_or(25usize);
     let late_screen_wave = max_wave.max(50);
     assert!(broad_scenarios > 0 && ga_generations > 0 && ga_population >= 2);
+    let source_revision = source_revision();
+    let source_dirty = source_dirty();
     let started = Instant::now();
     let mut broad = SensitivityAccumulator::new();
     let base_perks: Vec<_> = (0..12)
@@ -2224,18 +2326,21 @@ fn sensitivity(args: &[String]) {
         .map(|(key, stats)| (key.clone(), stats.json()))
         .collect::<serde_json::Map<_, _>>();
     let report = json!({
-        "schema":3,
+        "schema":4,
         "kind":"perk-sensitivity",
         "seed":seed.to_string(),
+        "sourceRevision":source_revision,
+        "sourceDirty":source_dirty,
         "config":{
             "broadScenarios":broad_scenarios,
             "gaGenerations":ga_generations,
             "gaPopulation":ga_population,
             "gaElitesReevaluated":false,
+            "gaCensorAware":true,
             "screenMaxWave":max_wave,
             "lateScreenWave":late_screen_wave,
             "lateScreenPerks":[PERK_NAMES[8],PERK_NAMES[10],PERK_NAMES[11]],
-            "fullWaveFinalistsPerPerk":ga_population.min(64),
+            "fullWaveFinalistsPerPerk":full_pairs/12,
             "corpusDimensions":{
                 "maps":[0,1,2],
                 "enemySpeedFactors":SPEED_LEVELS,
@@ -2250,19 +2355,31 @@ fn sensitivity(args: &[String]) {
         },
         "counts":{"pairedComparisons":total_pairs,"counterfactualLogicalArms":counterfactual_logical_arms,"counterfactualPrefixGroups":counterfactual_prefix_groups,"policyGenerationRuns":policy_runs,"totalLogicalSimulations":total_logical_simulations,"broadPairs":broad_pairs,"targetedPairs":targeted_pairs,"fullWavePairs":full_pairs},
         "execution":{
-            "countUnit":"logical-complete-simulation-output",
+            "countUnit":"logical-simulation-arm-output",
             "sharedPreInterventionPrefixes":true,
             "broadPrefixesSharedAcrossPerks":true,
             "policyCheckpointsReused":true,
             "naturalPolicyBaselineArmsReused":true,
             "compactSensitivityResults":true,
-            "countSemantics":"Logical complete outputs; common pre-intervention ticks execute once, and an already-executed natural policy arm is reused when it is exactly identical."
+            "censoredClearTimeExcluded":true,
+            "gaCensorAware":true,
+            "tickCap":EXECUTION_TICK_CAP,
+            "countSemantics":"Logical arm outputs; common pre-intervention ticks execute once, an already-executed natural policy arm is reused when it is exactly identical, and capped arms remain explicitly censored."
+        },
+        "tickCapMetadata":{
+            "ticksPerArm":EXECUTION_TICK_CAP,
+            "dtSeconds":DT,
+            "simulatedSecondsAtCap":EXECUTION_TICK_CAP as f64*DT,
+            "metric":"tickCapReached",
+            "utilityWeight":CAP_TRANSITION_UTILITY_WEIGHT,
+            "outcomeScoreWeight":CAP_TRANSITION_OUTCOME_WEIGHT
         },
         "elapsedSeconds":elapsed,
         "threads":rayon::current_num_threads(),
         "logicalSimulationsPerSecond":total_logical_simulations as f64/elapsed.max(f64::MIN_POSITIVE),
         "effectConvention":"all deltas are perk-on minus perk-off under identical seed, map, params, and action queue",
-        "inferenceCaveat":"Broad-phase confidence intervals are inferential for the fixed stratified corpus; adaptive targeted and full-wave confidence intervals are descriptive because the genetic search selected those samples.",
+        "inferenceCaveat":"Broad-phase confidence intervals describe uncertainty under the declared seed-driven scenario generator and represented parameter ranges. Adaptive targeted and full-wave confidence intervals are descriptive because the genetic search selected those samples.",
+        "censoringCaveat":"When either arm reaches the tick cap, clearSeconds is excluded from aggregate clear-time moments and set to zero in the paired effect. The directional tickCapReached metric carries the cap transition instead; other outcome and mechanical deltas remain observed.",
         "classificationCaveat":"mechanically inactive means no observed effect in this executed corpus and adversarial search, not a mathematical proof over an infinite state space",
         "classificationRules":{
             "mechanically inactive":"no measured outcome or mechanical delta in broad, targeted, or full-wave phases",
@@ -2355,4 +2472,112 @@ fn bench(args: &[String]) {
     )
     .unwrap();
     println!("{}", serde_json::to_string_pretty(&report).unwrap())
+}
+
+#[cfg(test)]
+mod sensitivity_tests {
+    use super::*;
+
+    fn summary(seconds: f64, capped: bool, ticks: usize) -> CounterfactualSummary {
+        CounterfactualSummary {
+            wave: 20,
+            lives: 10,
+            gold: 100.,
+            seconds,
+            capped,
+            ticks,
+            telemetry: Telemetry::default(),
+        }
+    }
+
+    fn context() -> SensitivityContext {
+        SensitivityContext {
+            homing: false,
+            splash: false,
+            composition: "empty",
+            enemy_speed_factor: 1.,
+            range_factor: 1.,
+            hp_factor: 1.,
+            count_factor: 1.,
+            map: 0,
+            activation_wave: 10,
+            rush_proximity: "on-rush",
+            focus_tower: 0,
+            sell_strategy: false,
+            sell_slot: 0,
+            sell_scheduled: false,
+            screen_wave: 25,
+            reaction_bucket: "fast",
+            reaction_ticks: 0,
+            apm: 60.,
+        }
+    }
+
+    #[test]
+    fn complete_pair_retains_clear_seconds_delta() {
+        let observation = effect_observation(summary(12.5, false, 375), summary(9.25, false, 278));
+        assert_eq!(observation.metrics[CLEAR_SECONDS_METRIC], -3.25);
+        assert_eq!(observation.metrics[TICK_CAP_METRIC], 0.);
+        assert!(!observation.off_capped);
+        assert!(!observation.on_capped);
+    }
+
+    #[test]
+    fn censored_pair_uses_directional_cap_metric_not_clear_seconds() {
+        let on_capped = effect_observation(
+            summary(12.5, false, 375),
+            summary(100_000., true, EXECUTION_TICK_CAP),
+        );
+        assert_eq!(on_capped.metrics[CLEAR_SECONDS_METRIC], 0.);
+        assert_eq!(on_capped.metrics[TICK_CAP_METRIC], 1.);
+        assert_eq!(on_capped.utility, -CAP_TRANSITION_UTILITY_WEIGHT);
+        assert_eq!(on_capped.outcome_score, CAP_TRANSITION_OUTCOME_WEIGHT);
+
+        let off_capped = effect_observation(
+            summary(100_000., true, EXECUTION_TICK_CAP),
+            summary(9.25, false, 278),
+        );
+        assert_eq!(off_capped.metrics[CLEAR_SECONDS_METRIC], 0.);
+        assert_eq!(off_capped.metrics[TICK_CAP_METRIC], -1.);
+        assert_eq!(off_capped.utility, CAP_TRANSITION_UTILITY_WEIGHT);
+        assert_eq!(off_capped.outcome_score, CAP_TRANSITION_OUTCOME_WEIGHT);
+    }
+
+    #[test]
+    fn censored_pairs_are_excluded_from_clear_time_moments() {
+        let complete = effect_observation(summary(12.5, false, 375), summary(9.25, false, 278));
+        let censored = effect_observation(
+            summary(12.5, false, 375),
+            summary(100_000., true, EXECUTION_TICK_CAP),
+        );
+        let mut stats = EffectStats::new();
+        stats.push(&complete, context());
+        stats.push(&censored, context());
+
+        assert_eq!(stats.pairs, 2);
+        assert_eq!(stats.pair_censored, 1);
+        assert_eq!(stats.on_capped, 1);
+        assert_eq!(stats.cap_transition, 1);
+        assert_eq!(stats.metrics[CLEAR_SECONDS_METRIC].n, 1);
+        assert_eq!(stats.metrics[CLEAR_SECONDS_METRIC].mean(), -3.25);
+    }
+
+    #[test]
+    fn all_censored_clear_time_moments_serialize_as_finite_zero_sample_data() {
+        let censored = effect_observation(
+            summary(12.5, false, 375),
+            summary(100_000., true, EXECUTION_TICK_CAP),
+        );
+        let mut stats = EffectStats::new();
+        stats.push(&censored, context());
+
+        let report = stats.json();
+        let clear = &report["metrics"]["clearSeconds"];
+        assert_eq!(clear["samples"], 0);
+        assert_eq!(clear["mean"], 0.);
+        assert_eq!(clear["min"], 0.);
+        assert_eq!(clear["max"], 0.);
+        assert_eq!(clear["ci95"], json!([0., 0.]));
+        assert!(serde_json::to_vec(&report).is_ok());
+    }
 }

@@ -78,9 +78,10 @@ an exact common-random-number pair: identical seed, parameters, map, and action
 queue, with one doctrine forced off versus on. It reports paired deltas and 95%
 confidence intervals for survival wave, lives, gold, leaks, leak damage, clear
 time, effective and overkill damage, projectile latency, and wasted shots. The
-broad-corpus intervals summarize a fixed sample. Intervals from the genetic
-search and its finalists are descriptive because those candidates were selected
-adaptively.
+broad-corpus intervals treat the declared seed-driven scenario generator as the
+sampling distribution; they do not claim coverage outside the represented
+parameter ranges. Intervals from the genetic search and its finalists are
+descriptive because those candidates were selected adaptively.
 
 After the broad pass, a genetic search targets the largest outcome or mechanical
 effect for each doctrine separately, then replays finalists through wave 50.
@@ -94,10 +95,17 @@ natural arm when it is byte-for-byte the required off or on result. These
 counts are logical outputs, not independent full starts. Its output is
 `out/sensitivity-report.json`; each doctrine keeps the exact seed, policy
 genome, scenario settings, and measured effect for its best targeted and
-full-wave examples. Classifications
-mean "observed under this finite corpus and adversarial search"; they are not a
-proof over every possible state and do not automatically modify or delete a
-doctrine.
+full-wave examples. The report also records the exact source revision and, for
+every arm, its executed tick count and whether it reached the 3,000,000-tick
+limit (100,000 simulated seconds at 30 Hz). A pair is right-censored when either
+arm reaches that limit before defeat or the requested wave. Censored clear times
+are excluded from clear-time moments and set to zero in the paired clear-time
+effect; a separate directional `tickCapReached` metric lets the GA distinguish
+an on-only cap from an off-only cap without rewarding a fabricated 100,000-second
+clear-time delta. Other endpoint and telemetry deltas remain observed alongside
+the censor flag. Classifications mean "observed under this finite corpus and
+adversarial search"; they are not a proof over every possible state and do not
+automatically modify or delete a doctrine.
 
 The defender runs a cheap stat-range screen, wave-25 partial games, and 60-wave
 endless finalists. A diagonal CMA-ES searches the continuous constants, tower,
