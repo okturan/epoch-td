@@ -96,16 +96,33 @@ counts are logical outputs, not independent full starts. Its output is
 `out/sensitivity-report.json`; each doctrine keeps the exact seed, policy
 genome, scenario settings, and measured effect for its best targeted and
 full-wave examples. The report also records the exact source revision and, for
-every arm, its executed tick count and whether it reached the 3,000,000-tick
-limit (100,000 simulated seconds at 30 Hz). A pair is right-censored when either
-arm reaches that limit before defeat or the requested wave. Censored clear times
-are excluded from clear-time moments and set to zero in the paired clear-time
-effect; a separate directional `tickCapReached` metric lets the GA distinguish
-an on-only cap from an off-only cap without rewarding a fabricated 100,000-second
-clear-time delta. Other endpoint and telemetry deltas remain observed alongside
-the censor flag. Classifications mean "observed under this finite corpus and
-adversarial search"; they are not a proof over every possible state and do not
-automatically modify or delete a doctrine.
+every phase, aggregate complete and capped-pair counts. Retained best examples
+include each arm's exact tick count and cap flag. The per-arm limit is 3,000,000
+ticks (100,000 simulated seconds at 30 Hz). A pair is right-censored when either
+arm reaches that limit before defeat or the requested wave. A capped arm is not
+a completed observation, so a pair containing either kind of cap contributes
+only to censor diagnostics. It is excluded from all ordinary effect moments,
+confidence intervals, utility, maxima, examples, and genetic-search fitness.
+Each phase reports `completePairs`, both-arm caps, one-arm cap transitions, and
+directional arm-cap counts separately. Ordinary effect sample counts must equal
+`completePairs`; the directional `tickCapReached` diagnostic uses all pairs.
+A one-arm transition prevents an inactive or redundant label because the paired
+runs demonstrably diverged, but it is never assigned a benefit, harm, or effect
+magnitude. A both-arm cap supplies no classification evidence.
+
+Utility deliberately excludes cumulative effective damage: a longer surviving
+run can accumulate more damage without making the doctrine better. Damage,
+overkill, wasted shots, and gold remain reported on completed pairs, but they
+can still reflect unequal run duration and should be interpreted with the
+survival, leak, and clear-time results. Classifications mean "observed under
+this finite corpus and adversarial search"; they are not a proof over every
+possible state and do not automatically modify or delete a doctrine.
+
+The full checker requires at least two million complete pairs, one of the five
+requested effect classifications for every doctrine, a clean source tree, and
+the same Git revision and dirty state at the beginning and end of the run. Smoke
+reports may use `insufficient complete evidence` when every broad pair for a
+doctrine is censored.
 
 The defender runs a cheap stat-range screen, wave-25 partial games, and 60-wave
 endless finalists. A diagonal CMA-ES searches the continuous constants, tower,
