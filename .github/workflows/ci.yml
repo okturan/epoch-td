@@ -41,7 +41,7 @@ jobs:
           rustup override set 1.96.1
 
       - name: Check JavaScript syntax
-        run: node --check sim.js && node --check qa.js && node --check endless.js && node --check screenshot.js && node --check oracle.js && node --check balance-lab/golden/generate.js && node --check balance-lab/apply-params.js && node --check balance-lab/check-report.js && node --check balance-lab/check-defender.js && node --check balance-lab/capture-playtraces.js && node --check balance-lab/inspect-dashboard.js
+        run: node --check sim.js && node --check qa.js && node --check endless.js && node --check screenshot.js && node --check oracle.js && node --check balance-lab/golden/generate.js && node --check balance-lab/apply-params.js && node --check balance-lab/check-report.js && node --check balance-lab/check-defender.js && node --check balance-lab/check-sensitivity.js && node --check balance-lab/capture-playtraces.js && node --check balance-lab/inspect-dashboard.js
 
       - name: Check Rust balance lab formatting
         run: cargo fmt --manifest-path balance-lab/Cargo.toml --all -- --check
@@ -53,7 +53,7 @@ jobs:
         run: npm test
 
       - name: Verify distributional search gates
-        run: npm run lab:search-gates && npm run lab:defender-gates
+        run: npm run lab:search-gates && npm run lab:defender-gates && npm run lab:sensitivity-smoke
 
       - name: Reject tracked-output drift
         run: git diff --exit-code

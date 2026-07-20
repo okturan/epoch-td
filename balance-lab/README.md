@@ -18,6 +18,12 @@ cargo run --release --manifest-path balance-lab/Cargo.toml -- attack 20 256 1
 # Tiered outer parameter search; writes a report and reviewable JS patch
 cargo run --release --manifest-path balance-lab/Cargo.toml -- defend 6 24 48 7
 
+# More than two million paired perk-off/perk-on comparisons (multi-hour)
+npm run lab:sensitivity
+
+# Small structural gate used by CI
+npm run lab:sensitivity-smoke
+
 # Turn an attacker or defender report into a dependency-free dashboard
 cargo run --release --manifest-path balance-lab/Cargo.toml -- dashboard
 
@@ -61,6 +67,73 @@ fusions, doctrines, timed powerups, and early calls. Placement scores coverage,
 corners, center, edges, and support adjacency. Reaction delay and an APM cap keep
 the policy from issuing impossible bursts. Interesting elites retain their exact
 seed and action list in the report.
+
+The sensitivity command builds a stratified corpus across maps, placement and
+tower policies, enemy speed/health/count, tower range, reaction timing, and
+doctrine activation immediately before and on rush waves. It injects explicit
+sell strategies for refund testing and extends projectile-speed, irradiation,
+and slow-field screens through wave 50 so homing and late towers are present.
+Each observation is
+an exact common-random-number pair: identical seed, parameters, map, and action
+queue, with one doctrine forced off versus on. It reports paired deltas and 95%
+confidence intervals for survival wave, lives, gold, leaks, leak damage, clear
+time, effective and overkill damage, projectile latency, and wasted shots. The
+broad generator is seeded, and the simulation is deterministic for fixed
+inputs. A scenario seed can select a deterministic fallback relic when a
+scheduled pick is unresolved; it is not an in-run random stream. Full-wave
+finalist records are therefore selected deterministic replays, not independent
+stochastic seed holdouts. They extend nine targeted screens from wave 25 to wave
+50; the other three already target wave 50.
+Broad-corpus intervals treat the declared seed-driven scenario generator as the
+sampling distribution; they do not claim coverage outside the represented
+parameter ranges. Intervals from the genetic search and its finalists are
+descriptive because those candidates were selected adaptively.
+
+After the broad pass, a genetic search targets the largest outcome or mechanical
+effect for each doctrine separately, then replays finalists through wave 50.
+Projectile-speed results are additionally stratified by homing, splash, enemy
+speed, range, map geometry, tower composition, reaction timing, and rush
+proximity. The default produces 2,036,352 paired comparisons and 5,109,056
+logical simulation outputs, including policy generation. Common
+pre-intervention ticks execute once and are cloned across paired arms and, in
+the broad corpus, across perks. The runner also reuses the generated policy's
+natural arm when it is byte-for-byte the required off or on result. These
+counts are logical outputs, not independent full starts. Its output is
+`out/sensitivity-report.json`; each doctrine keeps the exact seed, policy
+genome, scenario settings, and measured effect for its best targeted and
+full-wave examples. The report also records the exact source revision and, for
+every phase, aggregate complete and capped-pair counts. Retained best examples
+include each arm's exact tick count and cap flag. The per-arm limit is 3,000,000
+ticks (100,000 simulated seconds at 30 Hz). A pair is right-censored when either
+arm reaches that limit before defeat or the requested wave. A capped arm is not
+a completed observation, so a pair containing either kind of cap contributes
+only to censor diagnostics. It is excluded from all ordinary effect moments,
+confidence intervals, utility, maxima, examples, and genetic-search fitness.
+Each phase reports `completePairs`, both-arm caps, one-arm cap transitions, and
+directional arm-cap counts separately. Ordinary effect sample counts must equal
+`completePairs`; the directional `tickCapReached` diagnostic uses all pairs.
+A one-arm transition prevents an inactive or redundant label because the paired
+runs demonstrably diverged, but it is never assigned a benefit, harm, or effect
+magnitude. A both-arm cap supplies no classification evidence.
+
+Utility deliberately excludes cumulative effective damage: a longer surviving
+run can accumulate more damage without making the doctrine better. Damage,
+overkill, wasted shots, and gold remain reported on completed pairs, but they
+can still reflect unequal run duration and should be interpreted with the
+survival, leak, and clear-time results. Classifications mean "observed under
+this finite corpus and adversarial search"; they are not a proof over every
+possible state and do not automatically modify or delete a doctrine.
+
+The full checker requires at least two million complete pairs, one of the five
+requested effect classifications for every doctrine, a clean source tree, and
+the same Git revision and dirty state at the beginning and end of the run. Smoke
+reports may use `insufficient complete evidence` when every broad pair for a
+doctrine is censored.
+
+The accepted schema-5 run and its balance conclusions are recorded in
+[`SENSITIVITY-RESULTS.md`](SENSITIVITY-RESULTS.md). The generated 77 MB JSON
+artifact stays ignored; the results note records its source revision and
+SHA-256 digest.
 
 The defender runs a cheap stat-range screen, wave-25 partial games, and 60-wave
 endless finalists. A diagonal CMA-ES searches the continuous constants, tower,
