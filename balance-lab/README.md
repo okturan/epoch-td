@@ -78,7 +78,13 @@ an exact common-random-number pair: identical seed, parameters, map, and action
 queue, with one doctrine forced off versus on. It reports paired deltas and 95%
 confidence intervals for survival wave, lives, gold, leaks, leak damage, clear
 time, effective and overkill damage, projectile latency, and wasted shots. The
-broad-corpus intervals treat the declared seed-driven scenario generator as the
+broad generator is seeded, and the simulation is deterministic for fixed
+inputs. A scenario seed can select a deterministic fallback relic when a
+scheduled pick is unresolved; it is not an in-run random stream. Full-wave
+finalist records are therefore selected deterministic replays, not independent
+stochastic seed holdouts. They extend nine targeted screens from wave 25 to wave
+50; the other three already target wave 50.
+Broad-corpus intervals treat the declared seed-driven scenario generator as the
 sampling distribution; they do not claim coverage outside the represented
 parameter ranges. Intervals from the genetic search and its finalists are
 descriptive because those candidates were selected adaptively.
@@ -123,6 +129,11 @@ requested effect classifications for every doctrine, a clean source tree, and
 the same Git revision and dirty state at the beginning and end of the run. Smoke
 reports may use `insufficient complete evidence` when every broad pair for a
 doctrine is censored.
+
+The accepted schema-5 run and its balance conclusions are recorded in
+[`SENSITIVITY-RESULTS.md`](SENSITIVITY-RESULTS.md). The generated 77 MB JSON
+artifact stays ignored; the results note records its source revision and
+SHA-256 digest.
 
 The defender runs a cheap stat-range screen, wave-25 partial games, and 60-wave
 endless finalists. A diagonal CMA-ES searches the continuous constants, tower,
