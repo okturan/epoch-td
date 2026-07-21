@@ -137,7 +137,7 @@ rates. Relevant/inactive mechanic strata and composition strata are reported for
 every doctrine. The report
 embeds the source revision and verifies that it stayed stable throughout the
 run. The full run is intentionally not part of CI; the structural smoke gate is.
-The accepted 20 July 2026 run and its doctrine-by-doctrine conclusions are in
+The accepted 21 July 2026 schema-6 run and its doctrine-by-doctrine conclusions are in
 [`balance-lab/SENSITIVITY-RESULTS.md`](balance-lab/SENSITIVITY-RESULTS.md).
 
 CI uses a pinned Rust 1.96.1 toolchain and runs formatting, unit, oracle, policy,

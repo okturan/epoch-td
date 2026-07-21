@@ -140,10 +140,9 @@ revision and dirty state at the beginning and end of the run. Smoke reports may
 use `insufficient complete evidence` when every broad pair for a doctrine is
 censored.
 
-The previously accepted schema-5 run and its balance conclusions are recorded in
-[`SENSITIVITY-RESULTS.md`](SENSITIVITY-RESULTS.md). The generated 77 MB JSON
-artifact stays ignored; the results note records its source revision and
-SHA-256 digest.
+The accepted schema-6 run and its balance conclusions are recorded in
+[`SENSITIVITY-RESULTS.md`](SENSITIVITY-RESULTS.md). The generated JSON artifact
+stays ignored; the results note records its source revision and SHA-256 digest.
 
 The defender runs a cheap stat-range screen, wave-25 partial games, and 60-wave
 endless finalists. A diagonal CMA-ES searches the continuous constants, tower,
