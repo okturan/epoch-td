@@ -159,7 +159,7 @@ const AGES=[
 ['Information','#232336','#454578','#9090ff',134,207.7,'sawtooth'],
 ['Space','#131320','#39395d','#c870ff',140,220,'sawtooth']];
 const C={hp:14,g:1.12,cnt:.8,spd:.008,bty:.38};
-const B={upgrade_cost:.6,sell_refund:.7,doctrine_upgrade_cost:.5,doctrine_sell_refund:.85,doctrine_bounty:1,doctrine_range:1.08,doctrine_cooldown:.7,doctrine_knockback:1.5,doctrine_boss_knockback:.3,doctrine_lives:3,doctrine_projectile_speed:1.3,doctrine_splash:1.2,doctrine_irradiate:1,doctrine_slow:.5,burn_cap:5,doctrine_burn_cap:7,power_cooldowns:[45,30,40],power_ages:[1,4,7],meteor_damage:3,meteor_radius:1.5,stasis_duration:2.5,stasis_factor:.15,overdrive_duration:8,overdrive_multiplier:1.5};
+const B={upgrade_cost:.6,sell_refund:.7,doctrine_upgrade_cost:.5,doctrine_sell_refund:.85,doctrine_bounty:1,doctrine_range:1.08,doctrine_cooldown:.7,doctrine_knockback:1.5,doctrine_boss_knockback:.2,doctrine_knockback_bonus_cap:.7,doctrine_knockback_bonus_recovery:.12,doctrine_lives:3,doctrine_projectile_speed:1.3,doctrine_splash:1.2,doctrine_irradiate:1,doctrine_slow:.5,doctrine_slow_full_seconds:12,doctrine_slow_fade_seconds:12,burn_cap:5,doctrine_burn_cap:7,power_cooldowns:[45,30,40],power_ages:[1,4,7],meteor_damage:3,meteor_radius:1.5,stasis_duration:2.5,stasis_factor:.15,overdrive_duration:8,overdrive_multiplier:1.5};
 function waveRow(w){
   const k=Math.ceil(w/5),p=(w-1)%5,boss=p===4&&k%2===0,rush=p===4&&k%2===1;
   const A=ARCH[(p===1?Math.max(0,k-2):k-1)%10];
@@ -185,7 +185,7 @@ const ev=(S,t,a,b,c)=>{S.ev.push({t,a,b,c})};
 function mkState(){return{gold:80,lives:20,wave:0,pw:[0,0,0],od:0,phase:'clear',autoT:1e9,spawns:[],endless:0,t:0,wst:0,enemies:[],towers:[],projs:[],ev:[],ty:{},rl:{},pick:null,kills:0,bossK:0,goldE:0,over:0,won:0,dn:0}}
 function mkEnemy(R,d,f){
   const hp=Math.round(R.hp*(f||1)),[x,y]=posAt(d||0);
-  return{row:R,d:d||0,x,y,hp,max:hp,spd:R.spd,ar:R.ar,rg:R.rg,cap:R.cap,dash:R.dash,dc:2.5,inc:0,split:f?0:R.split,bty:f?1:R.bty,leak:R.leak,boss:R.boss,burnN:0,burnT:0,burnP:1,hitT:0,irr:0,slow:0,slowF:.6,leaked:0};
+  return{row:R,d:d||0,x,y,hp,max:hp,spd:R.spd,ar:R.ar,rg:R.rg,cap:R.cap,dash:R.dash,dc:2.5,inc:0,split:f?0:R.split,bty:f?1:R.bty,leak:R.leak,boss:R.boss,burnN:0,burnT:0,burnP:1,hitT:0,irr:0,slow:0,slowF:.6,coldA:0,coldF:0,shockD:0,leaked:0};
 }
 function getRow(i){return WAVES[i]||(WAVES[i]=waveRow(i+1))}
 function startWave(S){
@@ -220,12 +220,12 @@ const RELICS=[
 {n:'Standing Army',d:'All towers +8% range',k:'rng8',i:'rng'},
 {n:'War Economy',d:'Selling refunds 85% (was 70%)',k:'sell85',i:'g'},
 {n:'Scrap Drive',d:'Upgrades cost 50% of base (was 60%)',k:'up50',i:'g'},
-{n:'Shock Doctrine',d:'Knockback +50%, twice as strong on bosses',k:'kb15',i:'kb'},
+{n:'Shock Doctrine',d:'Past halfway: knockback +50% (+100% vs bosses)',k:'kb15',i:'kb'},
 {n:'Iron Curtain',d:'+3 lives, immediately',k:'life3',i:'hp'},
 {n:'Overcharge Rails',d:'Projectiles fly 30% faster',k:'pv13',i:'spd'},
 {n:'Siege Corps',d:'Splash radius +20%',k:'sp12',i:'sp'},
 {n:'Fission Ammo',d:'Irradiation lingers 1.0s (was 0.5s)',k:'irr1',i:'aura'},
-{n:'Cold Snap',d:'Slow fields chill 50% (was 40%)',k:'slow5',i:'sf'}];
+{n:'Cold Snap',d:'Slow fields chill 50%, easing to 40% against stalled enemies',k:'slow5',i:'sf'}];
 const SECRETS=[
 {a:1,b:3,lv:2,base:1,n:'Meteor Thrower',d:'lobbed fire — bigger splash, double burn',f:{dm:2,sp:1.4,bu:1,bum:2}},
 {a:2,b:4,lv:2,base:4,n:'Siege Piercer',d:'armor-ignoring heavy shells',f:{dm:2,pi:1,kb:1.1}},
@@ -311,9 +311,10 @@ function update(S,dt){
   if(S.phase==='clear'&&(S.autoT-=dt)<=0)startWave(S);
   for(const j of S.spawns)if((j.st-=dt)<=0&&j.sn<j.R.n){S.enemies.push(mkEnemy(j.R));j.sn++;j.st+=j.R.rush?.28:.8}
   S.spawns=S.spawns.filter(j=>j.sn<j.R.n);
+  for(const e of S.enemies)e.coldF=0;
   for(const t of S.towers){
     const T=TOWERS[t.i],M=t.sec!=null?SECRETS[t.sec].f:(T['b'+t.br]||{}),m=Math.pow(1.5,t.lvl)*(M.dm||1)*(t.mb||1),rg=T.rg*(M.rgm||1)*(1+.06*t.lvl)*(S.rl.rng8?B.doctrine_range:1);
-    if(T.field){for(const e of S.enemies)if(inR(t,e,rg)&&e.slow<.2){e.slow=.15;e.slowF=M.sf||(S.rl.slow5?B.doctrine_slow:.6)}continue}
+    if(T.field){for(const e of S.enemies)if(inR(t,e,rg)&&e.slow<.2){e.slow=.15;if(M.sf)e.slowF=M.sf;else if(S.rl.slow5){const f=Math.max(0,Math.min(1,(e.coldA-B.doctrine_slow_full_seconds)/B.doctrine_slow_fade_seconds));e.slowF=B.doctrine_slow+(.6-B.doctrine_slow)*f;e.coldF=1}else e.slowF=.6}continue}
     if(T.aura){for(const e of S.enemies)if(inR(t,e,rg)){raw(S,e,T.d*m*dt*(e.irr>0?1.2:1)*(S.od>0?B.overdrive_multiplier:1),7,t);e.irr=S.rl.irr1?B.doctrine_irradiate:.5}continue}
     if(T.beam){
       let L=t.lock;
@@ -340,7 +341,7 @@ function update(S,dt){
     if(L<=st){
       if(p.sp){const sr=p.sp*(S.rl.sp12?B.doctrine_splash:1);for(const e of S.enemies)if((e.x-tx)**2+(e.y-ty)**2<=sr*sr)dmg(S,e,p.d,p.pi,p.i,1,p.tw);p.tg.inc-=p.d}
       else if(p.tg.hp>0&&!p.tg.leaked)dmg(S,p.tg,p.d,p.pi,p.i,0,p.tw);
-      if(p.kb&&p.tg.hp>0)p.tg.d=Math.max(0,p.tg.d-p.kb*(S.rl.kb15?B.doctrine_knockback:1)*(p.tg.boss?(S.rl.kb15?B.doctrine_boss_knockback:.15):1));
+      if(p.kb&&p.tg.hp>0){const base=p.kb*(p.tg.boss?.15:1);let kb=base;if(S.rl.kb15&&p.tg.d>=PLEN*.5){const total=p.kb*B.doctrine_knockback*(p.tg.boss?B.doctrine_boss_knockback:1),bonus=Math.min(Math.max(0,total-base),Math.max(0,B.doctrine_knockback_bonus_cap-p.tg.shockD));p.tg.shockD+=bonus;kb+=bonus}p.tg.d=Math.max(0,p.tg.d-kb)}
       if(p.bu&&p.tg.hp>0){p.tg.burnT=3;p.tg.burnN=Math.min(S.rl.burn7?B.doctrine_burn_cap:B.burn_cap,p.tg.burnN+1);p.tg.burnP=Math.max(p.tg.burnP,p.bu)}
       if(p.ir&&p.tg.hp>0)p.tg.irr=S.rl.irr1?B.doctrine_irradiate:.5;
       if(p.sl&&p.tg.hp>0&&p.tg.slow<.2){p.tg.slow=.5;p.tg.slowF=.6}
@@ -351,6 +352,8 @@ function update(S,dt){
   for(const e of S.enemies){
     if(e.dash){e.dc-=dt;if(e.dc<=0)e.dc+=2.5}
     const sm=(e.dash&&e.dc<.6?2.4:1)*(e.slow>0?e.slowF:1);
+    if(e.coldF)e.coldA+=dt;else e.coldA=0;
+    e.shockD=Math.max(0,e.shockD-B.doctrine_knockback_bonus_recovery*dt);
     e.slow-=dt;e.irr-=dt;e.hitT-=dt;
     e.d+=e.spd*sm*dt;
     if(e.rg&&e.hp>0&&e.hp<e.max)e.hp=Math.min(e.max,e.hp+e.rg*dt);

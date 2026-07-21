@@ -106,11 +106,19 @@ pub struct Rules {
     pub doctrine_cooldown: f64,
     pub doctrine_knockback: f64,
     pub doctrine_boss_knockback: f64,
+    #[serde(default = "default_doctrine_knockback_bonus_cap")]
+    pub doctrine_knockback_bonus_cap: f64,
+    #[serde(default = "default_doctrine_knockback_bonus_recovery")]
+    pub doctrine_knockback_bonus_recovery: f64,
     pub doctrine_lives: i32,
     pub doctrine_projectile_speed: f64,
     pub doctrine_splash: f64,
     pub doctrine_irradiate: f64,
     pub doctrine_slow: f64,
+    #[serde(default = "default_doctrine_slow_full_seconds")]
+    pub doctrine_slow_full_seconds: f64,
+    #[serde(default = "default_doctrine_slow_fade_seconds")]
+    pub doctrine_slow_fade_seconds: f64,
     pub burn_cap: f64,
     pub doctrine_burn_cap: f64,
     pub power_cooldowns: [f64; 3],
@@ -121,6 +129,22 @@ pub struct Rules {
     pub stasis_factor: f64,
     pub overdrive_duration: f64,
     pub overdrive_multiplier: f64,
+}
+
+fn default_doctrine_knockback_bonus_cap() -> f64 {
+    0.7
+}
+
+fn default_doctrine_knockback_bonus_recovery() -> f64 {
+    0.12
+}
+
+fn default_doctrine_slow_full_seconds() -> f64 {
+    12.
+}
+
+fn default_doctrine_slow_fade_seconds() -> f64 {
+    12.
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -859,12 +883,16 @@ impl Default for Params {
                 doctrine_range: 1.08,
                 doctrine_cooldown: 0.7,
                 doctrine_knockback: 1.5,
-                doctrine_boss_knockback: 0.3,
+                doctrine_boss_knockback: 0.2,
+                doctrine_knockback_bonus_cap: default_doctrine_knockback_bonus_cap(),
+                doctrine_knockback_bonus_recovery: default_doctrine_knockback_bonus_recovery(),
                 doctrine_lives: 3,
                 doctrine_projectile_speed: 1.3,
                 doctrine_splash: 1.2,
                 doctrine_irradiate: 1.,
                 doctrine_slow: 0.5,
+                doctrine_slow_full_seconds: default_doctrine_slow_full_seconds(),
+                doctrine_slow_fade_seconds: default_doctrine_slow_fade_seconds(),
                 burn_cap: 5.,
                 doctrine_burn_cap: 7.,
                 power_cooldowns: [45., 30., 40.],
@@ -1005,6 +1033,9 @@ struct Enemy {
     irr: f64,
     slow: f64,
     slow_f: f64,
+    cold_age: f64,
+    cold_field: bool,
+    shock_debt: f64,
     leaked: bool,
 }
 #[derive(Clone, Default)]
@@ -1033,6 +1064,9 @@ struct EnemySoa {
     irr: Vec<f64>,
     slow: Vec<f64>,
     slow_f: Vec<f64>,
+    cold_age: Vec<f64>,
+    cold_field: Vec<u8>,
+    shock_debt: Vec<f64>,
     leaked: Vec<u8>,
 }
 impl EnemySoa {
@@ -1045,7 +1079,8 @@ impl EnemySoa {
         macro_rules! r{($($f:ident),*)=>{$(self.$f.reserve(n);)*}}
         r!(
             id, row, d, x, y, hp, max, speed, armor, regen, cap, dash, dc, inc, split, bounty,
-            leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, leaked
+            leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, cold_age, cold_field,
+            shock_debt, leaked
         );
     }
     fn len(&self) -> usize {
@@ -1058,11 +1093,12 @@ impl EnemySoa {
         macro_rules! p{($($f:ident),*)=>{$(self.$f.push(e.$f);)*}}
         p!(
             id, row, d, x, y, hp, max, speed, armor, regen, cap, dc, inc, bounty, leak, burn_n,
-            burn_t, burn_p, irr, slow, slow_f
+            burn_t, burn_p, irr, slow, slow_f, cold_age, shock_debt
         );
         self.dash.push(u8::from(e.dash));
         self.split.push(u8::from(e.split));
         self.boss.push(u8::from(e.boss));
+        self.cold_field.push(u8::from(e.cold_field));
         self.leaked.push(u8::from(e.leaked));
     }
     fn retain_alive(&mut self) {
@@ -1075,7 +1111,8 @@ impl EnemySoa {
                     macro_rules! c{($($f:ident),*)=>{$(self.$f[w]=self.$f[i];)*}}
                     c!(
                         d, x, y, hp, max, speed, armor, regen, cap, dash, dc, inc, split, bounty,
-                        leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, leaked
+                        leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, cold_age,
+                        cold_field, shock_debt, leaked
                     );
                 }
                 w += 1
@@ -1084,7 +1121,8 @@ impl EnemySoa {
         macro_rules! t{($($f:ident),*)=>{$(self.$f.truncate(w);)*}}
         t!(
             id, row, d, x, y, hp, max, speed, armor, regen, cap, dash, dc, inc, split, bounty,
-            leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, leaked
+            leak, boss, burn_n, burn_t, burn_p, irr, slow, slow_f, cold_age, cold_field,
+            shock_debt, leaked
         );
     }
 }
@@ -1301,10 +1339,14 @@ pub struct Telemetry {
     pub leak_damage: i64,
     pub effective_damage: f64,
     pub overkill_damage: f64,
+    pub combat_seconds: f64,
     pub projectiles_fired: u64,
     pub projectile_impacts: u64,
     pub projectile_latency_seconds: f64,
     pub wasted_projectiles: u64,
+    pub power_uses: [u64; 3],
+    pub knockback_distance: f64,
+    pub slow_enemy_seconds: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1327,6 +1369,7 @@ pub struct CounterfactualSummary {
     pub wave: usize,
     pub lives: i32,
     pub gold: f64,
+    pub kills: u64,
     pub seconds: f64,
     pub ticks: usize,
     pub capped: bool,
@@ -1765,6 +1808,7 @@ impl Sim {
             } else {
                 1.
             };
+        self.telemetry.power_uses[power] += 1;
         match power {
             0 => {
                 let damage = self.params.rules.meteor_damage
@@ -1819,6 +1863,9 @@ impl Sim {
             irr: 0.,
             slow: 0.,
             slow_f: 0.6,
+            cold_age: 0.,
+            cold_field: false,
+            shock_debt: 0.,
             leaked: false,
         };
         self.next_enemy += 1;
@@ -1880,6 +1927,7 @@ impl Sim {
             return;
         }
         self.t += dt;
+        self.telemetry.combat_seconds += dt;
         self.overdrive = (self.overdrive - dt).max(0.);
         for cooldown in &mut self.power_cooldowns {
             *cooldown = (*cooldown - dt).max(0.);
@@ -1899,6 +1947,7 @@ impl Sim {
             self.spawn_enemy(r, 0., None)
         }
         self.born_scratch = born_rows;
+        self.enemies.cold_field.fill(0);
         for ti in 0..self.towers.len() {
             let spec = &self.params.towers[self.towers[ti].i];
             let (spec_ramp, spec_aura, spec_field, spec_beam) =
@@ -1966,11 +2015,19 @@ impl Sim {
                         && self.enemies.slow[ei] < 0.2
                     {
                         self.enemies.slow[ei] = 0.15;
-                        self.enemies.slow_f[ei] = b_sf.unwrap_or(if self.perk_active(11) {
+                        self.enemies.slow_f[ei] = if let Some(factor) = b_sf {
+                            factor
+                        } else if self.perk_active(11) {
+                            let fade = ((self.enemies.cold_age[ei]
+                                - self.params.rules.doctrine_slow_full_seconds)
+                                / self.params.rules.doctrine_slow_fade_seconds)
+                                .clamp(0., 1.);
+                            self.enemies.cold_field[ei] = 1;
                             self.params.rules.doctrine_slow
+                                + (0.6 - self.params.rules.doctrine_slow) * fade
                         } else {
                             0.6
-                        })
+                        }
                     }
                 }
                 continue;
@@ -2170,23 +2227,29 @@ impl Sim {
                 }
                 if let Some(i) = target_index {
                     if p.kb > 0. && self.enemies.hp[i] > 0. {
-                        self.enemies.d[i] = (self.enemies.d[i]
-                            - p.kb
-                                * if self.perk_active(6) {
-                                    self.params.rules.doctrine_knockback
+                        let before = self.enemies.d[i];
+                        let baseline = p.kb * if self.enemies.boss[i] != 0 { 0.15 } else { 1. };
+                        let knockback = if self.perk_active(6)
+                            && before >= (self.path.len() - 1) as f64 * 0.5
+                        {
+                            let doctrine_total = p.kb
+                                * self.params.rules.doctrine_knockback
+                                * if self.enemies.boss[i] != 0 {
+                                    self.params.rules.doctrine_boss_knockback
                                 } else {
                                     1.
-                                }
-                                * (if self.enemies.boss[i] != 0 {
-                                    if self.perk_active(6) {
-                                        self.params.rules.doctrine_boss_knockback
-                                    } else {
-                                        0.15
-                                    }
-                                } else {
-                                    1.
-                                }))
-                        .max(0.)
+                                };
+                            let available = (self.params.rules.doctrine_knockback_bonus_cap
+                                - self.enemies.shock_debt[i])
+                                .max(0.);
+                            let bonus = (doctrine_total - baseline).max(0.).min(available);
+                            self.enemies.shock_debt[i] += bonus;
+                            baseline + bonus
+                        } else {
+                            baseline
+                        };
+                        self.enemies.d[i] = (before - knockback).max(0.);
+                        self.telemetry.knockback_distance += before - self.enemies.d[i]
                     }
                     if p.burn > 0. && self.enemies.hp[i] > 0. {
                         self.enemies.burn_t[i] = 3.;
@@ -2235,6 +2298,17 @@ impl Sim {
             } else {
                 1.
             });
+            if self.enemies.slow[ei] > 0. {
+                self.telemetry.slow_enemy_seconds += dt
+            }
+            if self.enemies.cold_field[ei] != 0 {
+                self.enemies.cold_age[ei] += dt
+            } else {
+                self.enemies.cold_age[ei] = 0.
+            }
+            self.enemies.shock_debt[ei] = (self.enemies.shock_debt[ei]
+                - self.params.rules.doctrine_knockback_bonus_recovery * dt)
+                .max(0.);
             self.enemies.slow[ei] -= dt;
             self.enemies.irr[ei] -= dt;
             self.enemies.d[ei] += self.enemies.speed[ei] * sm * dt;
@@ -2572,6 +2646,7 @@ fn summarize(
         wave: sim.wave,
         lives: sim.lives,
         gold: round6(sim.gold),
+        kills: sim.kills,
         seconds: round6(total_seconds),
         ticks,
         capped: ticks >= EXECUTION_TICK_CAP && !completed,

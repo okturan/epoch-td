@@ -18,7 +18,7 @@ cargo run --release --manifest-path balance-lab/Cargo.toml -- attack 20 256 1
 # Tiered outer parameter search; writes a report and reviewable JS patch
 cargo run --release --manifest-path balance-lab/Cargo.toml -- defend 6 24 48 7
 
-# More than two million paired perk-off/perk-on comparisons (multi-hour)
+# More than 3.7 million paired perk-off/perk-on comparisons (multi-hour)
 npm run lab:sensitivity
 
 # Small structural gate used by CI
@@ -77,7 +77,9 @@ Each observation is
 an exact common-random-number pair: identical seed, parameters, map, and action
 queue, with one doctrine forced off versus on. It reports paired deltas and 95%
 confidence intervals for survival wave, lives, gold, leaks, leak damage, clear
-time, effective and overkill damage, projectile latency, and wasted shots. The
+time, effective and overkill damage, projectile latency, wasted shots, damage
+rate, overkill per kill, wasted-shot rate, knockback rate, slow coverage, and
+power uses. The
 broad generator is seeded, and the simulation is deterministic for fixed
 inputs. A scenario seed can select a deterministic fallback relic when a
 scheduled pick is unresolved; it is not an in-run random stream. Full-wave
@@ -89,11 +91,15 @@ sampling distribution; they do not claim coverage outside the represented
 parameter ranges. Intervals from the genetic search and its finalists are
 descriptive because those candidates were selected adaptively.
 
-After the broad pass, a genetic search targets the largest outcome or mechanical
-effect for each doctrine separately, then replays finalists through wave 50.
+After the broad pass, three independent genetic searches target benefit, harm,
+and mechanical activity for each doctrine, then replay 64 finalists per search
+through wave 50. This prevents a search for large absolute effects from hiding a
+small but repeatable harmful region. Each doctrine is also split into
+mechanic-relevant and mechanic-inactive policies, plus empty, mono, focused, and
+broad tower compositions.
 Projectile-speed results are additionally stratified by homing, splash, enemy
 speed, range, map geometry, tower composition, reaction timing, and rush
-proximity. The default produces 2,036,352 paired comparisons and 5,109,056
+proximity. The default produces 3,709,056 paired comparisons and 10,127,168
 logical simulation outputs, including policy generation. Common
 pre-intervention ticks execute once and are cloned across paired arms and, in
 the broad corpus, across perks. The runner also reuses the generated policy's
@@ -117,23 +123,26 @@ runs demonstrably diverged, but it is never assigned a benefit, harm, or effect
 magnitude. A both-arm cap supplies no classification evidence.
 
 Utility deliberately excludes cumulative effective damage: a longer surviving
-run can accumulate more damage without making the doctrine better. Damage,
-overkill, wasted shots, and gold remain reported on completed pairs, but they
-can still reflect unequal run duration and should be interpreted with the
-survival, leak, and clear-time results. Classifications mean "observed under
+run can accumulate more damage without making the doctrine better. Raw totals
+remain in the report, alongside duration- and event-normalized rates. A release
+gate rejects any completed pair where a doctrine adds more than 600 seconds
+without changing survival, lives, gold, leaks, or leak damage. Classifications
+mean "observed under
 this finite corpus and adversarial search"; they are not a proof over every
 possible state and do not automatically modify or delete a doctrine.
 
-The full checker requires at least two million complete pairs, one of the five
-requested effect classifications for every doctrine, a clean source tree, and
-the same Git revision and dirty state at the beginning and end of the run. Smoke
-reports may use `insufficient complete evidence` when every broad pair for a
-doctrine is censored.
+The full checker requires at least two million complete pairs, while the report's
+release gate requires at least three million total pairs, 99.5% complete pairs,
+zero unexplained long stalls, populated relevant-context strata, and all three
+search objectives. It also requires one of the five requested effect
+classifications for every doctrine, a clean source tree, and the same Git
+revision and dirty state at the beginning and end of the run. Smoke reports may
+use `insufficient complete evidence` when every broad pair for a doctrine is
+censored.
 
-The accepted schema-5 run and its balance conclusions are recorded in
-[`SENSITIVITY-RESULTS.md`](SENSITIVITY-RESULTS.md). The generated 77 MB JSON
-artifact stays ignored; the results note records its source revision and
-SHA-256 digest.
+The accepted schema-6 run and its balance conclusions are recorded in
+[`SENSITIVITY-RESULTS.md`](SENSITIVITY-RESULTS.md). The generated JSON artifact
+stays ignored; the results note records its source revision and SHA-256 digest.
 
 The defender runs a cheap stat-range screen, wave-25 partial games, and 60-wave
 endless finalists. A diagonal CMA-ES searches the continuous constants, tower,

@@ -28,6 +28,12 @@ const ordinaryMetricNames = [
   "overkillDamage",
   "projectileLatencySeconds",
   "wastedProjectiles",
+  "damagePerCombatSecond",
+  "overkillPerKill",
+  "wastedShotRate",
+  "knockbackPerCombatSecond",
+  "slowCoverageRate",
+  "powerUses",
 ];
 const metricNames = [
   ...ordinaryMetricNames,
@@ -47,6 +53,7 @@ const ordinaryRateCountFields = [
   ["mechanicalChanged", "mechanicalChangeRate", "mechanicalChangeRateCi95"],
   ["positive", "positiveRate", "positiveRateCi95"],
   ["negative", "negativeRate", "negativeRateCi95"],
+  ["pathologicalStall", "pathologicalStallRate", "pathologicalStallRateCi95"],
 ];
 const canonicalPerks = [
   [0, "Napalm Doctrine"],
@@ -477,7 +484,13 @@ function checkExample(example, at, expectedWave) {
     Math.abs(metrics.effectiveDamage) * 0.001 +
     Math.abs(metrics.overkillDamage) * 0.001 +
     Math.abs(metrics.projectileLatencySeconds) * 10 +
-    Math.abs(metrics.wastedProjectiles);
+    Math.abs(metrics.wastedProjectiles) +
+    Math.abs(metrics.damagePerCombatSecond) +
+    Math.abs(metrics.overkillPerKill) +
+    Math.abs(metrics.wastedShotRate) * 100 +
+    Math.abs(metrics.knockbackPerCombatSecond) * 10 +
+    Math.abs(metrics.slowCoverageRate) * 10 +
+    Math.abs(metrics.powerUses);
   check(
     Number.isFinite(example.effect.utility) && closeEnough(example.effect.utility, expectedUtility),
     `${at}.effect.utility does not match its metrics`,
@@ -492,10 +505,16 @@ function checkExample(example, at, expectedWave) {
       closeEnough(example.effect.mechanicalScore, expectedMechanicalScore),
     `${at}.effect.mechanicalScore does not match its metrics`,
   );
+  check(["benefit", "harm", "mechanical"].includes(example.searchObjective), `${at}.searchObjective is invalid`);
+  const expectedFitness =
+    example.searchObjective === "benefit"
+      ? expectedUtility * 1_000 + expectedMechanicalScore
+      : example.searchObjective === "harm"
+        ? -expectedUtility * 1_000 + expectedMechanicalScore
+        : expectedMechanicalScore * 1_000 + expectedOutcomeScore;
   check(
-    Number.isFinite(example.fitness) &&
-      closeEnough(example.fitness, expectedOutcomeScore * 1_000 + expectedMechanicalScore),
-    `${at}.fitness does not match its effect scores`,
+    Number.isFinite(example.fitness) && closeEnough(example.fitness, expectedFitness),
+    `${at}.fitness does not match its search objective`,
   );
 }
 
@@ -616,6 +635,7 @@ function syntheticEffectStats({ pairs = 1, bothCapped = 0, offOnly = 0, onOnly =
     mechanicalChanged: 0,
     positive: 0,
     negative: 0,
+    pathologicalStall: 0,
     maxOutcomeScore: 0,
     maxMechanicalScore: 0,
     maxOutcomeContext: null,
@@ -668,7 +688,7 @@ if (selfTestOnly) {
 }
 
 check(report.kind === "perk-sensitivity", "wrong report kind");
-check(report.schema === 5, "wrong sensitivity schema");
+check(report.schema === 6, "wrong sensitivity schema");
 check(/^(0|[1-9]\d*)$/.test(report.seed), "report seed is not an exact decimal string");
 const gitRevisionPattern = /^(?!0{40}$)[0-9a-f]{40}$/;
 check(gitRevisionPattern.test(report.sourceRevision), "source revision is not an exact nonzero Git commit");
@@ -713,6 +733,10 @@ if (fullCorpus) {
 }
 check(report.config?.gaElitesReevaluated === false, "GA must not count unchanged elites as independent samples");
 check(report.config?.gaCensorAware === true, "GA must be censor-aware");
+check(
+  exactlyEqual(report.config?.gaObjectives, ["benefit", "harm", "mechanical"]),
+  "GA objectives must separately cover benefit, harm, and mechanical activity",
+);
 check(
   report.config?.gaCappedCandidatesRankBelowComplete === true,
   "GA config must rank capped candidates below complete candidates",
@@ -822,7 +846,10 @@ if (fullCorpus) {
 
 const expectedBroadPairs = report.config.broadScenarios * report.perks.length;
 const expectedTargetedPairs =
-  report.config.gaGenerations * report.config.gaPopulation * report.perks.length;
+  report.config.gaGenerations *
+  report.config.gaPopulation *
+  report.perks.length *
+  report.config.gaObjectives.length;
 const expectedFullWavePairs = report.config.fullWaveFinalistsPerPerk * report.perks.length;
 check(report.counts.broadPairs === expectedBroadPairs, "broad-pair count does not match config");
 check(report.counts.targetedPairs === expectedTargetedPairs, "targeted-pair count does not match config");
@@ -860,6 +887,32 @@ check(
   report.counts.counterfactualPrefixGroups === report.counts.policyGenerationRuns,
   "every policy-generation run must own exactly one counterfactual prefix group",
 );
+check(report.releaseGates && typeof report.releaseGates === "object", "release gates are missing");
+check(
+  Number.isSafeInteger(report.releaseGates.pathologicalStallPairs) &&
+    report.releaseGates.pathologicalStallPairs >= 0,
+  "pathological-stall gate count is invalid",
+);
+for (const key of [
+  "minimumThreeMillionPairs",
+  "completePairRateAtLeast99_5Percent",
+  "noPathologicalStalls",
+  "separateBenefitHarmMechanicalSearches",
+  "commonRandomNumbers",
+  "exactPairedInterventions",
+  "relevantContextStrata",
+]) {
+  check(typeof report.releaseGates.checks?.[key] === "boolean", `release gate ${key} is missing`);
+}
+check(
+  report.releaseGates.checks.noPathologicalStalls ===
+    (report.releaseGates.pathologicalStallPairs === 0),
+  "pathological-stall release gate disagrees with its count",
+);
+check(
+  report.releaseGates.pass === Object.values(report.releaseGates.checks).every(Boolean),
+  "release-gate pass does not equal the conjunction of checks",
+);
 const expectedBroadPolicyRuns =
   report.config.broadScenarios *
   (report.config.lateScreenWave > report.config.screenMaxWave ? 2 : 1);
@@ -879,7 +932,10 @@ for (const perk of report.perks) {
     : report.config.screenMaxWave;
   const expectedPairsByPhase = {
     broad: report.config.broadScenarios,
-    targeted: report.config.gaGenerations * report.config.gaPopulation,
+    targeted:
+      report.config.gaGenerations *
+      report.config.gaPopulation *
+      report.config.gaObjectives.length,
     fullWaveValidation: report.config.fullWaveFinalistsPerPerk,
   };
   const expectedWaveByPhase = {
@@ -904,6 +960,74 @@ for (const perk of report.perks) {
         expectedWaveByPhase[phase],
       );
     }
+  }
+  for (const [field, target, expectedPerObjective, expectedWave] of [
+    [
+      "targetedByObjective",
+      perk.targeted,
+      report.config.gaGenerations * report.config.gaPopulation,
+      targetedWave,
+    ],
+    [
+      "fullWaveByObjective",
+      perk.fullWaveValidation,
+      report.config.fullWaveFinalistsPerPerk / report.config.gaObjectives.length,
+      report.config.lateScreenWave,
+    ],
+  ]) {
+    const entries = Object.entries(perk[field] || {});
+    check(
+      exactlyEqual(entries.map(([objective]) => objective).sort(), [...report.config.gaObjectives].sort()),
+      `${perk.name}.${field} does not contain the canonical objectives`,
+    );
+    for (const [objective, stats] of entries) {
+      checkEffectStats(stats, `${perk.name}.${field}.${objective}`, expectedPerObjective);
+      for (const [scoreName, contextName] of [
+        ["maxOutcomeScore", "maxOutcomeContext"],
+        ["maxMechanicalScore", "maxMechanicalContext"],
+      ]) {
+        if (stats[scoreName] > 0) {
+          checkSensitivityContext(
+            stats[contextName],
+            `${perk.name}.${field}.${objective}.${contextName}`,
+            expectedWave,
+          );
+        }
+      }
+    }
+    checkStatsPartition(entries, target, `${perk.name}.${field}`);
+  }
+  for (const [field, statsField, expectedWave] of [
+    ["bestExamplesByObjective", "targetedByObjective", targetedWave],
+    ["bestFullWaveExamplesByObjective", "fullWaveByObjective", report.config.lateScreenWave],
+  ]) {
+    const examples = perk[field] || {};
+    check(
+      exactlyEqual(Object.keys(examples).sort(), [...report.config.gaObjectives].sort()),
+      `${perk.name}.${field} does not contain the canonical objectives`,
+    );
+    for (const objective of report.config.gaObjectives) {
+      const stats = perk[statsField][objective];
+      if (stats.completePairs === 0) {
+        check(examples[objective] == null, `${perk.name}.${field}.${objective} must be absent without a complete pair`);
+      } else {
+        checkExample(examples[objective], `${perk.name}.${field}.${objective}`, expectedWave);
+        check(examples[objective].searchObjective === objective, `${perk.name}.${field}.${objective} objective mismatch`);
+      }
+    }
+  }
+  const strata = Object.entries(perk.contextStrata || {});
+  for (const [key, stats] of strata) {
+    check(
+      key.startsWith("composition:") || key.startsWith("mechanic:"),
+      `${perk.name}.contextStrata contains unknown key ${key}`,
+    );
+    checkEffectStats(stats, `${perk.name}.contextStrata.${key}`);
+  }
+  for (const prefix of ["composition", "mechanic"]) {
+    const entries = strata.filter(([key]) => key.startsWith(`${prefix}:`));
+    check(entries.length > 0, `${perk.name} is missing ${prefix} strata`);
+    checkStatsPartition(entries, perk.broad, `${perk.name}.${prefix} strata`);
   }
   check(
     perk.classification === expectedClassification(perk),
@@ -958,6 +1082,14 @@ check(
     report.counts.censoredPairedComparisons,
   "counts.censoredPairedComparisons does not match all perk phases",
 );
+check(
+  allPerkPhaseStats.reduce((sum, stats) => sum + stats.pathologicalStall, 0) ===
+    report.releaseGates.pathologicalStallPairs,
+  "release-gate pathological-stall count does not match all perk phases",
+);
+if (fullCorpus) {
+  check(report.releaseGates.pass === true, "full sensitivity corpus did not pass every release gate");
+}
 
 const interactions = report.projectileSpeedInteractions || {};
 const interactionKeys = Object.keys(interactions);
