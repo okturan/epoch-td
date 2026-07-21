@@ -115,15 +115,15 @@ npm run lab:defender-gates
 npm run lab:sensitivity-smoke
 ```
 
-For doctrine sensitivity, `npm run lab:sensitivity` produces more than two
-million exact perk-off/perk-on comparisons (over five million logical simulation
-outputs when policy-generation runs are included), requires at least two million
-complete pairs for the full report, reports paired 95% confidence intervals,
-and uses a genetic search to find contexts that maximize each
-doctrine's effect. Common pre-intervention ticks execute once and are cloned.
+For doctrine sensitivity, `npm run lab:sensitivity` produces 3,709,056 exact
+perk-off/perk-on comparisons (10,127,168 logical simulation outputs when policy
+generation is included), requires at least two million complete pairs for the
+full report, and reports paired 95% confidence intervals. Separate genetic
+searches maximize benefit, harm, and mechanical activity for each doctrine.
+Common pre-intervention ticks execute once and are cloned.
 When the generated policy's natural run is exactly one paired arm, that result
-is reused too. The five-million count is therefore a logical output count, not
-five million independent full starts. Phase aggregates record arms that reached
+is reused too. The ten-million count is therefore a logical output count, not
+ten million independent full starts. Phase aggregates record arms that reached
 the 3,000,000-tick execution limit. Those arms are right-censored, and
 any pair containing one is excluded from ordinary effect metrics, intervals,
 utility, and genetic-search fitness rather than being treated as a completed
@@ -131,7 +131,10 @@ run. Cap counts and transitions remain available as censor diagnostics; a
 one-arm transition is evidence of activity, but not of benefit or harm. Broad-
 corpus intervals describe uncertainty under the declared seed-driven scenario
 generator and represented parameter ranges; genetic-search and finalist
-intervals are descriptive because candidate selection is adaptive. The report
+intervals are descriptive because candidate selection is adaptive. Raw damage,
+overkill, and waste totals are accompanied by duration- and event-normalized
+rates. Relevant/inactive mechanic strata and composition strata are reported for
+every doctrine. The report
 embeds the source revision and verifies that it stayed stable throughout the
 run. The full run is intentionally not part of CI; the structural smoke gate is.
 The accepted 20 July 2026 run and its doctrine-by-doctrine conclusions are in

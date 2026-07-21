@@ -68,12 +68,12 @@ After every boss wave clears (10/20/30/40, and every boss in Endless), the game 
 | Standing Army | all towers +8% range |
 | War Economy | selling refunds 85% (was 70%) |
 | Scrap Drive | upgrades cost 50% of base (was 60%) |
-| Shock Doctrine | knockback +50%, ×2 on bosses |
+| Shock Doctrine | past halfway, knockback +50% (+100% on bosses); the bonus recovers over time |
 | Iron Curtain | +3 lives immediately |
 | Overcharge Rails | projectiles +30% speed |
 | Siege Corps | splash radius +20% |
 | Fission Ammo | irradiation lingers 1.0s (was 0.5s) |
-| Cold Snap | slow fields 50% (was 40%) |
+| Cold Snap | slow fields 50%, easing to the normal 40% against enemies stalled in a field |
 
 ## Secret fusions (hidden in-game — discovered through adjacency)
 Two adjacent towers matching a recipe (both at/above the minimum level) can fuse — via the gold card row or by dragging one onto the other. The survivor takes the hybrid identity (base type swaps where noted), keeps the higher level, combines invested gold, gains the +10% merge bonus, and its specialization is replaced by the fusion overlay. The in-game help only hints ("rumors…"); discovery is the reward. Fusion multipliers are tuned by analysis.js, an isolation-arena harness that measures every tower, branch, and fusion effective DPS per cell and per gold, with a balance guard that fails if any fusion becomes a runaway (>1.85x its base best branch) or a trap (<0.95x its base).

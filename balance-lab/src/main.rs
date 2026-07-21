@@ -64,12 +64,13 @@ fn main() {
         Some("batch") => batch(args.get(2)),
         Some("calibrate") => calibrate(args.get(2)),
         Some("sensitivity") => sensitivity(&args),
+        Some("sensitivity-replay") => sensitivity_replay(&args),
         _ => help(),
     }
 }
 fn help() {
     eprintln!(
-        "epoch-lab <run [case.json]|batch [jobs.json]|calibrate [traces.json]|golden [cases.json]|policy-golden [cases seed]|attack [generations population seed calibration.json]|defend [generations candidates policies seed calibration.json]|sensitivity [broad-scenarios ga-generations ga-population seed max-wave]|dashboard [report.json]|bench>"
+        "epoch-lab <run [case.json]|batch [jobs.json]|calibrate [traces.json]|golden [cases.json]|policy-golden [cases seed]|attack [generations population seed calibration.json]|defend [generations candidates policies seed calibration.json]|sensitivity [broad-scenarios ga-generations ga-population seed max-wave output.json]|sensitivity-replay [report.json perk field]|dashboard [report.json]|bench>"
     )
 }
 
@@ -1320,7 +1321,7 @@ const PERK_NAMES: [&str; 12] = [
     "Fission Ammo",
     "Cold Snap",
 ];
-const EFFECT_METRICS: [&str; 11] = [
+const EFFECT_METRICS: [&str; 17] = [
     "survivalWave",
     "lives",
     "gold",
@@ -1331,11 +1332,17 @@ const EFFECT_METRICS: [&str; 11] = [
     "overkillDamage",
     "projectileLatencySeconds",
     "wastedProjectiles",
+    "damagePerCombatSecond",
+    "overkillPerKill",
+    "wastedShotRate",
+    "knockbackPerCombatSecond",
+    "slowCoverageRate",
+    "powerUses",
     "tickCapReached",
 ];
 const CLEAR_SECONDS_METRIC: usize = 5;
-const MECHANICAL_METRICS: std::ops::Range<usize> = 6..10;
-const TICK_CAP_METRIC: usize = 10;
+const MECHANICAL_METRICS: std::ops::Range<usize> = 6..16;
+const TICK_CAP_METRIC: usize = 16;
 const SPEED_LEVELS: [f64; 5] = [0.65, 0.82, 1.0, 1.18, 1.4];
 const RANGE_LEVELS: [f64; 5] = [0.75, 0.9, 1.0, 1.15, 1.3];
 const HP_LEVELS: [f64; 3] = [0.85, 1.0, 1.18];
@@ -1427,11 +1434,12 @@ struct PreparedSensitivity {
     baseline_reusable: bool,
     context: SensitivityContext,
     interaction_labels: Vec<String>,
+    perk_relevant: [bool; 12],
 }
 
 #[derive(Clone)]
 struct EffectObservation {
-    metrics: [f64; 11],
+    metrics: [f64; EFFECT_METRICS.len()],
     utility: f64,
     outcome_score: f64,
     mechanical_score: f64,
@@ -1442,14 +1450,35 @@ struct EffectObservation {
     on_ticks: usize,
 }
 
-fn sensitivity_fitness(observation: &EffectObservation) -> f64 {
-    if observation.ordinary_eligible {
-        observation.outcome_score * 1_000. + observation.mechanical_score
-    } else {
-        // All valid effect scores are non-negative, so a capped candidate sorts
-        // below even an eligible exact-zero observation without using censoring
-        // itself as an optimization objective.
-        -1.
+#[derive(Clone, Copy, Debug)]
+enum SearchObjective {
+    Benefit,
+    Harm,
+    Mechanical,
+}
+
+impl SearchObjective {
+    const ALL: [Self; 3] = [Self::Benefit, Self::Harm, Self::Mechanical];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Benefit => "benefit",
+            Self::Harm => "harm",
+            Self::Mechanical => "mechanical",
+        }
+    }
+}
+
+fn sensitivity_fitness(observation: &EffectObservation, objective: SearchObjective) -> f64 {
+    if !observation.ordinary_eligible {
+        return f64::NEG_INFINITY;
+    }
+    match objective {
+        SearchObjective::Benefit => observation.utility * 1_000. + observation.mechanical_score,
+        SearchObjective::Harm => -observation.utility * 1_000. + observation.mechanical_score,
+        SearchObjective::Mechanical => {
+            observation.mechanical_score * 1_000. + observation.outcome_score
+        }
     }
 }
 
@@ -1518,6 +1547,7 @@ struct EffectStats {
     mechanical_changed: u64,
     positive: u64,
     negative: u64,
+    pathological_stall: u64,
     utility: Moment,
     metrics: Vec<Moment>,
     max_outcome_score: f64,
@@ -1538,6 +1568,7 @@ impl EffectStats {
             mechanical_changed: 0,
             positive: 0,
             negative: 0,
+            pathological_stall: 0,
             utility: Moment::new(),
             metrics: (0..EFFECT_METRICS.len()).map(|_| Moment::new()).collect(),
             max_outcome_score: 0.,
@@ -1599,6 +1630,15 @@ impl EffectStats {
         if observation.utility < -0.1 {
             self.negative += 1
         }
+        if observation.metrics[CLEAR_SECONDS_METRIC] > 600.
+            && observation.metrics[0].abs() <= EPS
+            && observation.metrics[1].abs() <= EPS
+            && observation.metrics[2].abs() <= EPS
+            && observation.metrics[3].abs() <= EPS
+            && observation.metrics[4].abs() <= EPS
+        {
+            self.pathological_stall += 1
+        }
         if observation.outcome_score > self.max_outcome_score {
             self.max_outcome_context = Some(context);
         }
@@ -1619,6 +1659,7 @@ impl EffectStats {
         self.mechanical_changed += other.mechanical_changed;
         self.positive += other.positive;
         self.negative += other.negative;
+        self.pathological_stall += other.pathological_stall;
         self.utility.merge(&other.utility);
         for (left, right) in self.metrics.iter_mut().zip(&other.metrics) {
             left.merge(right)
@@ -1683,6 +1724,9 @@ impl EffectStats {
             "negative":self.negative,
             "negativeRate":self.negative as f64/complete_pairs.max(1) as f64,
             "negativeRateCi95":negative_ci,
+            "pathologicalStall":self.pathological_stall,
+            "pathologicalStallRate":self.pathological_stall as f64/complete_pairs.max(1) as f64,
+            "pathologicalStallRateCi95":wilson95(self.pathological_stall,complete_pairs),
             "utility":self.utility.json(),
             "metrics":metrics,
             "maxOutcomeScore":self.max_outcome_score,
@@ -1708,6 +1752,7 @@ fn wilson95(successes: u64, trials: u64) -> [f64; 2] {
 
 struct SensitivityAccumulator {
     perks: Vec<EffectStats>,
+    perk_strata: Vec<BTreeMap<String, EffectStats>>,
     projectile_interactions: BTreeMap<String, EffectStats>,
     policy_runs: u64,
 }
@@ -1715,6 +1760,7 @@ impl SensitivityAccumulator {
     fn new() -> Self {
         Self {
             perks: (0..12).map(|_| EffectStats::new()).collect(),
+            perk_strata: (0..12).map(|_| BTreeMap::new()).collect(),
             projectile_interactions: BTreeMap::new(),
             policy_runs: 0,
         }
@@ -1725,8 +1771,21 @@ impl SensitivityAccumulator {
         observation: &EffectObservation,
         context: SensitivityContext,
         interaction_labels: &[String],
+        relevant: bool,
     ) {
         self.perks[perk].push(observation, context);
+        for label in [
+            format!("composition:{}", context.composition),
+            format!(
+                "mechanic:{}",
+                if relevant { "relevant" } else { "inactive" }
+            ),
+        ] {
+            self.perk_strata[perk]
+                .entry(label)
+                .or_insert_with(EffectStats::new)
+                .push(observation, context);
+        }
         if perk == 8 {
             for label in interaction_labels {
                 self.projectile_interactions
@@ -1745,6 +1804,14 @@ impl SensitivityAccumulator {
         self.policy_runs += other.policy_runs;
         for (left, right) in self.perks.iter_mut().zip(&other.perks) {
             left.merge(right)
+        }
+        for (perk, strata) in other.perk_strata.iter().enumerate() {
+            for (key, stats) in strata {
+                self.perk_strata[perk]
+                    .entry(key.clone())
+                    .or_insert_with(EffectStats::new)
+                    .merge(stats)
+            }
         }
         for (key, stats) in &other.projectile_interactions {
             self.projectile_interactions
@@ -1880,6 +1947,68 @@ fn prepare_sensitivity(
             .iter()
             .enumerate()
             .any(|(fusion, &count)| count > 0 && params.fusions[fusion].modifiers.sp.is_some());
+    let has_burn = policy
+        .tower_counts
+        .iter()
+        .enumerate()
+        .any(|(tower, &count)| {
+            count > 0
+                && (params.towers[tower].burn
+                    || (policy.branch_counts[tower][0] > 0
+                        && params.towers[tower].branch1.bu.is_some())
+                    || (policy.branch_counts[tower][1] > 0
+                        && params.towers[tower].branch2.bu.is_some()))
+        })
+        || policy
+            .fusion_counts
+            .iter()
+            .enumerate()
+            .any(|(fusion, &count)| count > 0 && params.fusions[fusion].modifiers.bu.is_some());
+    let has_knockback = policy
+        .tower_counts
+        .iter()
+        .enumerate()
+        .any(|(tower, &count)| {
+            count > 0
+                && (params.towers[tower].knockback > 0.
+                    || params.towers[tower].branch1.kb.is_some()
+                    || params.towers[tower].branch2.kb.is_some())
+        })
+        || policy
+            .fusion_counts
+            .iter()
+            .enumerate()
+            .any(|(fusion, &count)| count > 0 && params.fusions[fusion].modifiers.kb.is_some());
+    let has_projectile = policy
+        .tower_counts
+        .iter()
+        .enumerate()
+        .any(|(tower, &count)| {
+            count > 0
+                && !params.towers[tower].aura
+                && !params.towers[tower].field
+                && !params.towers[tower].beam
+        });
+    let has_irradiation = policy
+        .tower_counts
+        .iter()
+        .enumerate()
+        .any(|(tower, &count)| {
+            count > 0
+                && (params.towers[tower].aura
+                    || params.towers[tower].branch1.ir.is_some()
+                    || params.towers[tower].branch2.ir.is_some())
+        })
+        || policy
+            .fusion_counts
+            .iter()
+            .enumerate()
+            .any(|(fusion, &count)| count > 0 && params.fusions[fusion].modifiers.ir.is_some());
+    let has_field = policy
+        .tower_counts
+        .iter()
+        .enumerate()
+        .any(|(tower, &count)| count > 0 && params.towers[tower].field);
     let tower_kinds = policy
         .tower_counts
         .iter()
@@ -1916,6 +2045,29 @@ fn prepare_sensitivity(
     } else {
         vec![]
     };
+    let has_tower = policy.tower_counts.iter().any(|&count| count > 0);
+    let power_scheduled = policy
+        .actions
+        .iter()
+        .any(|action| action.op == "power" && action.wave >= gene.activation_wave);
+    let upgrade_scheduled = policy
+        .actions
+        .iter()
+        .any(|action| action.op == "upgrade" && action.wave >= gene.activation_wave);
+    let perk_relevant = [
+        has_burn,
+        has_tower,
+        power_scheduled,
+        has_tower,
+        !baseline_reusable,
+        upgrade_scheduled,
+        has_knockback,
+        true,
+        has_projectile,
+        has_splash,
+        has_irradiation,
+        has_field,
+    ];
     PreparedSensitivity {
         input: Input {
             seed,
@@ -1930,11 +2082,28 @@ fn prepare_sensitivity(
         baseline_reusable,
         context,
         interaction_labels,
+        perk_relevant,
     }
 }
 
 fn mean_latency(telemetry: &Telemetry) -> f64 {
     telemetry.projectile_latency_seconds / telemetry.projectile_impacts.max(1) as f64
+}
+
+fn per_combat_second(value: f64, telemetry: &Telemetry) -> f64 {
+    value / telemetry.combat_seconds.max(DT)
+}
+
+fn overkill_per_kill(summary: &CounterfactualSummary) -> f64 {
+    summary.telemetry.overkill_damage / summary.kills.max(1) as f64
+}
+
+fn wasted_shot_rate(telemetry: &Telemetry) -> f64 {
+    telemetry.wasted_projectiles as f64 / telemetry.projectiles_fired.max(1) as f64
+}
+
+fn power_uses(telemetry: &Telemetry) -> f64 {
+    telemetry.power_uses.iter().sum::<u64>() as f64
 }
 
 fn evaluate_prepared(
@@ -1988,6 +2157,15 @@ fn effect_observation(off: CounterfactualSummary, on: CounterfactualSummary) -> 
             on.telemetry.overkill_damage - off.telemetry.overkill_damage,
             mean_latency(&on.telemetry) - mean_latency(&off.telemetry),
             on.telemetry.wasted_projectiles as f64 - off.telemetry.wasted_projectiles as f64,
+            per_combat_second(on.telemetry.effective_damage, &on.telemetry)
+                - per_combat_second(off.telemetry.effective_damage, &off.telemetry),
+            overkill_per_kill(&on) - overkill_per_kill(&off),
+            wasted_shot_rate(&on.telemetry) - wasted_shot_rate(&off.telemetry),
+            per_combat_second(on.telemetry.knockback_distance, &on.telemetry)
+                - per_combat_second(off.telemetry.knockback_distance, &off.telemetry),
+            per_combat_second(on.telemetry.slow_enemy_seconds, &on.telemetry)
+                - per_combat_second(off.telemetry.slow_enemy_seconds, &off.telemetry),
+            power_uses(&on.telemetry) - power_uses(&off.telemetry),
             tick_cap_reached,
         ]
     } else {
@@ -2009,7 +2187,13 @@ fn effect_observation(off: CounterfactualSummary, on: CounterfactualSummary) -> 
     let mechanical_score = metrics[6].abs() * 0.001
         + metrics[7].abs() * 0.001
         + metrics[8].abs() * 10.
-        + metrics[9].abs();
+        + metrics[9].abs()
+        + metrics[10].abs()
+        + metrics[11].abs()
+        + metrics[12].abs() * 100.
+        + metrics[13].abs() * 10.
+        + metrics[14].abs() * 10.
+        + metrics[15].abs();
     EffectObservation {
         metrics,
         utility,
@@ -2028,11 +2212,13 @@ fn sensitivity_example(
     scenario_seed: u64,
     context: SensitivityContext,
     observation: &EffectObservation,
+    objective: SearchObjective,
 ) -> Value {
     debug_assert!(observation.ordinary_eligible);
-    let fitness = sensitivity_fitness(observation);
+    let fitness = sensitivity_fitness(observation, objective);
     json!({
         "fitness":fitness,
+        "searchObjective":objective.label(),
         "scenarioSeed":scenario_seed.to_string(),
         "screenSeed":scenario_seed.to_string(),
         "screenWave":context.screen_wave,
@@ -2157,6 +2343,103 @@ fn sensitivity_screen_wave(perk: usize, default_wave: usize) -> usize {
     }
 }
 
+fn sensitivity_replay(args: &[String]) {
+    let path = args
+        .get(2)
+        .map(String::as_str)
+        .unwrap_or("balance-lab/out/sensitivity-report.json");
+    let selector = args.get(3).map(String::as_str).unwrap_or("11");
+    let field = args
+        .get(4)
+        .map(String::as_str)
+        .unwrap_or("bestFullWaveExample");
+    let report: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    let perks = report["perks"]
+        .as_array()
+        .expect("report perks must be an array");
+    let perk = selector
+        .parse::<usize>()
+        .ok()
+        .filter(|&index| index < perks.len())
+        .or_else(|| {
+            perks
+                .iter()
+                .position(|entry| entry["name"].as_str() == Some(selector))
+        })
+        .expect("perk must be a valid id or exact name");
+    let example = &perks[perk][field];
+    assert!(example.is_object(), "selected report example is missing");
+    let factor_index = |levels: &[f64], key: &str| {
+        let value = example[key]
+            .as_f64()
+            .unwrap_or_else(|| panic!("example field {key} must be numeric"));
+        levels
+            .iter()
+            .position(|candidate| (*candidate - value).abs() <= 1e-9)
+            .unwrap_or_else(|| panic!("example field {key}={value} is not canonical"))
+    };
+    let scenario_seed = example["scenarioSeed"]
+        .as_str()
+        .expect("scenarioSeed must be an exact decimal string")
+        .parse::<u64>()
+        .unwrap();
+    let gene = SensitivityGene {
+        genome: Genome::from_vector(
+            &serde_json::from_value::<Vec<f64>>(example["genome"].clone()).unwrap(),
+        ),
+        trial_seed: scenario_seed,
+        sell_strategy: example["sellStrategy"].as_bool().unwrap(),
+        sell_slot: example["sellSlot"].as_u64().unwrap() as usize,
+        map: example["map"].as_u64().unwrap() as usize,
+        speed_level: factor_index(&SPEED_LEVELS, "enemySpeedFactor"),
+        range_level: factor_index(&RANGE_LEVELS, "rangeFactor"),
+        hp_level: factor_index(&HP_LEVELS, "hpFactor"),
+        count_level: factor_index(&COUNT_LEVELS, "countFactor"),
+        activation_wave: example["activationWave"].as_u64().unwrap() as usize,
+        focus_tower: example["focusTower"].as_u64().unwrap() as usize,
+    };
+    let screen_wave = example["screenWave"].as_u64().unwrap() as usize;
+    let prepared = prepare_sensitivity(&gene, scenario_seed, screen_wave, true);
+    let scheduled_power_actions = std::array::from_fn::<_, 3, _>(|power| {
+        prepared
+            .input
+            .actions
+            .iter()
+            .filter(|action| action.op == "power" && action.tower == power)
+            .count()
+    });
+    let (off, on) = run_counterfactual_summary_pair_from_checkpoint(
+        &prepared.input,
+        &prepared.checkpoint,
+        perk,
+        gene.activation_wave,
+        prepared.baseline_reusable,
+    );
+    let observation = effect_observation(off.clone(), on.clone());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "report":path,
+            "perk":{"id":perk,"name":PERK_NAMES[perk]},
+            "field":field,
+            "screenWave":screen_wave,
+            "scenarioSeed":scenario_seed.to_string(),
+            "scheduledActions":prepared.input.actions.len(),
+            "scheduledPowerActions":scheduled_power_actions,
+            "off":off,
+            "on":on,
+            "effect":{
+                "metrics":EFFECT_METRICS.iter().zip(observation.metrics).collect::<BTreeMap<_,_>>(),
+                "utility":observation.utility,
+                "outcomeScore":observation.outcome_score,
+                "mechanicalScore":observation.mechanical_score,
+                "ordinaryMetricsEligible":observation.ordinary_eligible,
+            }
+        }))
+        .unwrap()
+    );
+}
+
 fn source_revision() -> String {
     let root = env!("CARGO_MANIFEST_DIR").trim_end_matches("/balance-lab");
     Command::new("git")
@@ -2199,6 +2482,10 @@ fn sensitivity(args: &[String]) {
         .unwrap_or(20260719u64);
     let max_wave = args.get(6).and_then(|x| x.parse().ok()).unwrap_or(25usize);
     let late_screen_wave = max_wave.max(50);
+    let output_path = args
+        .get(7)
+        .map(String::as_str)
+        .unwrap_or("balance-lab/out/sensitivity-report.json");
     assert!(broad_scenarios > 0 && ga_generations > 0 && ga_population >= 2);
     let source_revision_at_start = source_revision();
     let source_dirty_at_start = source_dirty();
@@ -2231,6 +2518,7 @@ fn sensitivity(args: &[String]) {
                         &observation,
                         prepared.context,
                         &prepared.interaction_labels,
+                        prepared.perk_relevant[perk],
                     );
                 }
                 if let Some(late_prepared) = &late_prepared {
@@ -2242,6 +2530,7 @@ fn sensitivity(args: &[String]) {
                             &observation,
                             late_prepared.context,
                             &late_prepared.interaction_labels,
+                            late_prepared.perk_relevant[perk],
                         );
                     }
                 }
@@ -2260,105 +2549,141 @@ fn sensitivity(args: &[String]) {
 
     let mut targeted: Vec<EffectStats> = (0..12).map(|_| EffectStats::new()).collect();
     let mut full_wave: Vec<EffectStats> = (0..12).map(|_| EffectStats::new()).collect();
-    let mut best_examples = vec![Value::Null; 12];
-    let mut best_full_wave_examples = vec![Value::Null; 12];
+    let mut targeted_by_objective: Vec<[EffectStats; 3]> = (0..12)
+        .map(|_| std::array::from_fn(|_| EffectStats::new()))
+        .collect();
+    let mut full_wave_by_objective: Vec<[EffectStats; 3]> = (0..12)
+        .map(|_| std::array::from_fn(|_| EffectStats::new()))
+        .collect();
+    let mut best_examples: Vec<[Value; 3]> = (0..12)
+        .map(|_| std::array::from_fn(|_| Value::Null))
+        .collect();
+    let mut best_full_wave_examples: Vec<[Value; 3]> = (0..12)
+        .map(|_| std::array::from_fn(|_| Value::Null))
+        .collect();
     let mut targeted_policy_runs = 0u64;
     let mut full_policy_runs = 0u64;
     for perk in 0..12 {
-        let mut rng = Xoshiro::new(seed ^ (perk as u64 + 1).wrapping_mul(0xd1b54a32d192ed03));
-        let mut population: Vec<_> = (0..ga_population)
-            .map(|index| broad_gene(seed ^ perk as u64, index + perk * ga_population))
-            .collect();
-        let mut hall_of_fame: Vec<(f64, SensitivityGene, EffectObservation, SensitivityContext)> =
-            vec![];
-        for generation in 0..ga_generations {
-            let mut ranked: Vec<_> = population
-                .into_par_iter()
-                .with_max_len(1)
-                .map(|gene| {
-                    let scenario_seed = gene.trial_seed;
-                    let prepared = prepare_sensitivity(
-                        &gene,
-                        scenario_seed,
-                        sensitivity_screen_wave(perk, max_wave),
-                        false,
-                    );
-                    let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
-                    let fitness = sensitivity_fitness(&observation);
-                    (fitness, gene, observation, prepared.context)
+        for (objective_index, objective) in SearchObjective::ALL.into_iter().enumerate() {
+            let objective_seed = seed
+                ^ (perk as u64 + 1).wrapping_mul(0xd1b54a32d192ed03)
+                ^ (objective_index as u64 + 1).wrapping_mul(0x94d049bb133111eb);
+            let mut rng = Xoshiro::new(objective_seed);
+            let mut population: Vec<_> = (0..ga_population)
+                .map(|index| {
+                    broad_gene(
+                        objective_seed,
+                        index + (perk * 3 + objective_index) * ga_population,
+                    )
                 })
                 .collect();
-            targeted_policy_runs += ranked.len() as u64;
-            for (_, _, observation, context) in &ranked {
-                targeted[perk].push(observation, *context)
+            let mut hall_of_fame: Vec<(
+                f64,
+                SensitivityGene,
+                EffectObservation,
+                SensitivityContext,
+            )> = vec![];
+            for generation in 0..ga_generations {
+                let mut ranked: Vec<_> = population
+                    .into_par_iter()
+                    .with_max_len(1)
+                    .map(|gene| {
+                        let scenario_seed = gene.trial_seed;
+                        let prepared = prepare_sensitivity(
+                            &gene,
+                            scenario_seed,
+                            sensitivity_screen_wave(perk, max_wave),
+                            false,
+                        );
+                        let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
+                        let fitness = sensitivity_fitness(&observation, objective);
+                        (fitness, gene, observation, prepared.context)
+                    })
+                    .collect();
+                targeted_policy_runs += ranked.len() as u64;
+                for (_, _, observation, context) in &ranked {
+                    targeted[perk].push(observation, *context);
+                    targeted_by_objective[perk][objective_index].push(observation, *context);
+                }
+                ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
+                hall_of_fame.extend(ranked.iter().take(64).cloned());
+                hall_of_fame.sort_by(|a, b| b.0.total_cmp(&a.0));
+                hall_of_fame.truncate(64);
+                eprintln!(
+                    "sensitivity target {} {} generation {}/{}: best {:.3}",
+                    PERK_NAMES[perk],
+                    objective.label(),
+                    generation + 1,
+                    ga_generations,
+                    hall_of_fame[0].0
+                );
+                let elite_count = (ga_population / 8).max(2).min(ranked.len());
+                let elites: Vec<_> = ranked[..elite_count]
+                    .iter()
+                    .map(|(_, gene, _, _)| gene.clone())
+                    .collect();
+                population = (0..ga_population)
+                    .map(|_| {
+                        let parent = &elites[rng.next_u64() as usize % elites.len()];
+                        mutate_gene(parent, &mut rng)
+                    })
+                    .collect();
             }
-            ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
-            hall_of_fame.extend(ranked.iter().take(64).cloned());
-            hall_of_fame.sort_by(|a, b| b.0.total_cmp(&a.0));
-            hall_of_fame.truncate(64);
-            eprintln!(
-                "sensitivity target {} generation {}/{}: best {:.3}",
-                PERK_NAMES[perk],
-                generation + 1,
-                ga_generations,
-                hall_of_fame[0].0
-            );
-            let elite_count = (ga_population / 8).max(2).min(ranked.len());
-            let elites: Vec<_> = ranked[..elite_count]
-                .iter()
-                .map(|(_, gene, _, _)| gene.clone())
-                .collect();
-            population = (0..ga_population)
-                .map(|_| {
-                    let parent = &elites[rng.next_u64() as usize % elites.len()];
-                    mutate_gene(parent, &mut rng)
+            let finalists = hall_of_fame.len().min(64);
+            let finalist_observations: Vec<_> = hall_of_fame
+                .par_iter()
+                .take(finalists)
+                .enumerate()
+                .map(|(index, (_, gene, _, _))| {
+                    let scenario_seed = seed
+                        .wrapping_add(9_000_000_000)
+                        .wrapping_add(perk as u64 * 1_000_000)
+                        .wrapping_add(objective_index as u64 * 10_000)
+                        .wrapping_add(index as u64);
+                    let prepared =
+                        prepare_sensitivity(gene, scenario_seed, late_screen_wave, false);
+                    let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
+                    let fitness = sensitivity_fitness(&observation, objective);
+                    (
+                        fitness,
+                        scenario_seed,
+                        gene.clone(),
+                        observation,
+                        prepared.context,
+                    )
                 })
                 .collect();
-        }
-        let finalists = hall_of_fame.len().min(64);
-        let finalist_observations: Vec<_> = hall_of_fame
-            .par_iter()
-            .take(finalists)
-            .enumerate()
-            .map(|(index, (_, gene, _, _))| {
-                let scenario_seed = seed
-                    .wrapping_add(9_000_000_000)
-                    .wrapping_add(perk as u64 * 10_000)
-                    .wrapping_add(index as u64);
-                let prepared = prepare_sensitivity(gene, scenario_seed, late_screen_wave, false);
-                let observation = evaluate_prepared(&prepared, perk, gene.activation_wave);
-                let fitness = sensitivity_fitness(&observation);
-                (
-                    fitness,
-                    scenario_seed,
-                    gene.clone(),
-                    observation,
-                    prepared.context,
-                )
-            })
-            .collect();
-        full_policy_runs += finalist_observations.len() as u64;
-        for (_, _, _, observation, context) in &finalist_observations {
-            full_wave[perk].push(observation, *context);
-        }
-        if let Some(best) = hall_of_fame
-            .iter()
-            .find(|(_, _, observation, _)| observation.ordinary_eligible)
-        {
-            best_examples[perk] = sensitivity_example(&best.1, best.1.trial_seed, best.3, &best.2);
-        }
-        if let Some(best_full) = finalist_observations
-            .iter()
-            .filter(|(_, _, _, observation, _)| observation.ordinary_eligible)
-            .max_by(|left, right| left.0.total_cmp(&right.0))
-        {
-            best_full_wave_examples[perk] =
-                sensitivity_example(&best_full.2, best_full.1, best_full.4, &best_full.3);
+            full_policy_runs += finalist_observations.len() as u64;
+            for (_, _, _, observation, context) in &finalist_observations {
+                full_wave[perk].push(observation, *context);
+                full_wave_by_objective[perk][objective_index].push(observation, *context);
+            }
+            if let Some(best) = hall_of_fame
+                .iter()
+                .find(|(_, _, observation, _)| observation.ordinary_eligible)
+            {
+                best_examples[perk][objective_index] =
+                    sensitivity_example(&best.1, best.1.trial_seed, best.3, &best.2, objective);
+            }
+            if let Some(best_full) = finalist_observations
+                .iter()
+                .filter(|(_, _, _, observation, _)| observation.ordinary_eligible)
+                .max_by(|left, right| left.0.total_cmp(&right.0))
+            {
+                best_full_wave_examples[perk][objective_index] = sensitivity_example(
+                    &best_full.2,
+                    best_full.1,
+                    best_full.4,
+                    &best_full.3,
+                    objective,
+                );
+            }
         }
     }
 
     let broad_pairs = broad_scenarios as u64 * 12;
-    let targeted_pairs = ga_generations as u64 * ga_population as u64 * 12;
+    let targeted_pairs =
+        ga_generations as u64 * ga_population as u64 * 12 * SearchObjective::ALL.len() as u64;
     let full_pairs = full_policy_runs;
     let total_pairs = broad_pairs + targeted_pairs + full_pairs;
     let complete_pair_count = (0..12)
@@ -2369,6 +2694,13 @@ fn sensitivity(args: &[String]) {
         })
         .sum::<u64>();
     let censored_pair_count = total_pairs - complete_pair_count;
+    let pathological_stall_count = (0..12)
+        .map(|perk| {
+            broad.perks[perk].pathological_stall
+                + targeted[perk].pathological_stall
+                + full_wave[perk].pathological_stall
+        })
+        .sum::<u64>();
     let policy_runs = broad.policy_runs + targeted_policy_runs + full_policy_runs;
     let counterfactual_logical_arms = total_pairs * 2;
     let broad_prefix_groups =
@@ -2378,15 +2710,64 @@ fn sensitivity(args: &[String]) {
     let elapsed = started.elapsed().as_secs_f64();
     let perks = (0..12)
         .map(|perk| {
+            let targeted_objectives = SearchObjective::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(index, objective)| {
+                    (
+                        objective.label().to_owned(),
+                        targeted_by_objective[perk][index].json(),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>();
+            let full_objectives = SearchObjective::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(index, objective)| {
+                    (
+                        objective.label().to_owned(),
+                        full_wave_by_objective[perk][index].json(),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>();
+            let objective_examples = SearchObjective::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(index, objective)| {
+                    (
+                        objective.label().to_owned(),
+                        best_examples[perk][index].clone(),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>();
+            let full_objective_examples = SearchObjective::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(index, objective)| {
+                    (
+                        objective.label().to_owned(),
+                        best_full_wave_examples[perk][index].clone(),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>();
+            let context_strata = broad.perk_strata[perk]
+                .iter()
+                .map(|(key, stats)| (key.clone(), stats.json()))
+                .collect::<serde_json::Map<_, _>>();
             json!({
                 "id":perk,
                 "name":PERK_NAMES[perk],
                 "classification":classify_perk(&broad.perks[perk],&targeted[perk],&full_wave[perk]),
                 "broad":broad.perks[perk].json(),
+                "contextStrata":context_strata,
                 "targeted":targeted[perk].json(),
+                "targetedByObjective":targeted_objectives,
                 "fullWaveValidation":full_wave[perk].json(),
-                "bestAdversarialExample":best_examples[perk],
-                "bestFullWaveExample":best_full_wave_examples[perk],
+                "fullWaveByObjective":full_objectives,
+                "bestExamplesByObjective":objective_examples,
+                "bestFullWaveExamplesByObjective":full_objective_examples,
+                "bestAdversarialExample":best_examples[perk][2].clone(),
+                "bestFullWaveExample":best_full_wave_examples[perk][2].clone(),
             })
         })
         .collect::<Vec<_>>();
@@ -2399,8 +2780,22 @@ fn sensitivity(args: &[String]) {
     let source_dirty_at_completion = source_dirty();
     let source_stable_across_run = source_revision_at_start == source_revision_at_completion
         && source_dirty_at_start == source_dirty_at_completion;
+    let release_gates = json!({
+        "minimumThreeMillionPairs":total_pairs>=3_000_000,
+        "completePairRateAtLeast99_5Percent":complete_pair_count as f64/total_pairs as f64>=0.995,
+        "noPathologicalStalls":pathological_stall_count==0,
+        "separateBenefitHarmMechanicalSearches":true,
+        "commonRandomNumbers":true,
+        "exactPairedInterventions":true,
+        "relevantContextStrata":broad.perk_strata.iter().all(|strata|strata.contains_key("mechanic:relevant")),
+    });
+    let release_gate_pass = release_gates
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|value| value.as_bool() == Some(true));
     let report = json!({
-        "schema":5,
+        "schema":6,
         "kind":"perk-sensitivity",
         "seed":seed.to_string(),
         "sourceRevision":source_revision_at_start,
@@ -2412,6 +2807,7 @@ fn sensitivity(args: &[String]) {
             "broadScenarios":broad_scenarios,
             "gaGenerations":ga_generations,
             "gaPopulation":ga_population,
+            "gaObjectives":["benefit","harm","mechanical"],
             "gaElitesReevaluated":false,
             "gaCensorAware":true,
             "gaCappedCandidatesRankBelowComplete":true,
@@ -2432,6 +2828,7 @@ fn sensitivity(args: &[String]) {
             }
         },
         "counts":{"pairedComparisons":total_pairs,"completePairedComparisons":complete_pair_count,"censoredPairedComparisons":censored_pair_count,"counterfactualLogicalArms":counterfactual_logical_arms,"counterfactualPrefixGroups":counterfactual_prefix_groups,"policyGenerationRuns":policy_runs,"totalLogicalSimulations":total_logical_simulations,"broadPairs":broad_pairs,"targetedPairs":targeted_pairs,"fullWavePairs":full_pairs},
+        "releaseGates":{"pass":release_gate_pass,"checks":release_gates,"pathologicalStallPairs":pathological_stall_count},
         "execution":{
             "countUnit":"logical-simulation-arm-output",
             "sharedPreInterventionPrefixes":true,
@@ -2473,13 +2870,11 @@ fn sensitivity(args: &[String]) {
         "perks":perks,
         "projectileSpeedInteractions":interactions,
     });
-    fs::create_dir_all("balance-lab/out").unwrap();
-    fs::write(
-        "balance-lab/out/sensitivity-report.json",
-        serde_json::to_vec_pretty(&report).unwrap(),
-    )
-    .unwrap();
-    println!("{}", serde_json::to_string_pretty(&json!({"output":"balance-lab/out/sensitivity-report.json","counts":report["counts"],"elapsedSeconds":elapsed,"classifications":perks.iter().map(|perk|json!({"name":perk["name"],"classification":perk["classification"]})).collect::<Vec<_>>()})).unwrap());
+    if let Some(parent) = std::path::Path::new(output_path).parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(output_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    println!("{}", serde_json::to_string_pretty(&json!({"output":output_path,"counts":report["counts"],"elapsedSeconds":elapsed,"classifications":perks.iter().map(|perk|json!({"name":perk["name"],"classification":perk["classification"]})).collect::<Vec<_>>()})).unwrap());
 }
 
 fn dashboard(path: Option<&String>) {
@@ -2561,14 +2956,19 @@ mod sensitivity_tests {
     use super::*;
 
     fn summary(seconds: f64, capped: bool, ticks: usize) -> CounterfactualSummary {
+        let telemetry = Telemetry {
+            combat_seconds: seconds,
+            ..Telemetry::default()
+        };
         CounterfactualSummary {
             wave: 20,
             lives: 10,
             gold: 100.,
+            kills: 0,
             seconds,
             capped,
             ticks,
-            telemetry: Telemetry::default(),
+            telemetry,
         }
     }
 
@@ -2614,8 +3014,11 @@ mod sensitivity_tests {
 
         assert_eq!(observation.utility, 0.);
         assert_eq!(observation.outcome_score, 0.);
-        assert_eq!(observation.mechanical_score, 1_000.);
-        assert_eq!(sensitivity_fitness(&observation), 1_000.);
+        assert!(observation.mechanical_score > 1_000.);
+        assert_eq!(
+            sensitivity_fitness(&observation, SearchObjective::Mechanical),
+            observation.mechanical_score * 1_000.
+        );
     }
 
     #[test]
@@ -2644,7 +3047,10 @@ mod sensitivity_tests {
         assert_eq!(censored.utility, 0.);
         assert_eq!(censored.outcome_score, 0.);
         assert_eq!(censored.mechanical_score, 0.);
-        assert_eq!(sensitivity_fitness(&censored), -1.);
+        assert_eq!(
+            sensitivity_fitness(&censored, SearchObjective::Mechanical),
+            f64::NEG_INFINITY
+        );
 
         let mut stats = EffectStats::new();
         stats.push(&censored, context());
