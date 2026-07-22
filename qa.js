@@ -19,6 +19,18 @@ const ok=(name,cond,extra)=>{if(!cond)failures++;console.log(name.padEnd(20)+': 
   ok('start screen',await pg.evaluate(()=>document.getElementById('mapsov').style.display!=='none'&&document.querySelectorAll('#maps button').length===3));
   await pg.click('#maps button:nth-child(1)');
   ok('map select',await pg.evaluate(()=>document.getElementById('mapsov').style.display==='none'&&PLEN===52));
+  const smartDraft=await pg.evaluate(()=>{
+    const X=mkState();place(X,0,4,2);X.wave=10;
+    const offers=doctrineOffers(X),relevance=offers.map(i=>relicRelevant(X,i));
+    X.gold=10000;place(X,1,5,2);
+    return{offers,relevance,splashRelevant:relicRelevant(X,9)};
+  });
+  ok('smart doctrine draft',JSON.stringify(smartDraft.offers)==='[1,2,9]'&&smartDraft.relevance[0]&&smartDraft.relevance[1]&&!smartDraft.relevance[2]&&smartDraft.splashRelevant);
+  await pg.evaluate(()=>{S.wave=10;S.pick=doctrineOffers(S)});
+  await pg.waitForTimeout(80);
+  const draftText=await pg.locator('#relics').textContent();
+  ok('doctrine context',draftText.includes('Active now')&&draftText.includes('Planning option'));
+  await pg.evaluate(()=>{S.wave=0;S.pick=null;document.getElementById('relicov').style.display='none'});
   const replay={seed:7,map:1,maxWave:2,actions:[{wave:0,op:'place',tower:0,x:4,y:2},{wave:1,op:'place',tower:0,x:8,y:2}]};
   const rp=await br.newPage({viewport:{width:1060,height:900}});
   await rp.goto('file://'+__dirname+'/index.html?replay='+encodeURIComponent(Buffer.from(JSON.stringify(replay)).toString('base64')));
@@ -102,12 +114,12 @@ const ok=(name,cond,extra)=>{if(!cond)failures++;console.log(name.padEnd(20)+': 
   await pg.waitForTimeout(80);
   ok('poor = unclickable',await pg.evaluate(()=>document.querySelector('#panel button[data-c]').disabled));
   ok('card explains upgrade',(await pg.locator('#panel').textContent()).includes('+6%'));
-  await pg.evaluate(()=>{S.pick=[0,1,2]});
+  const offeredDoctrine=await pg.evaluate(()=>{S.wave=20;S.pick=doctrineOffers(S);return RELICS[S.pick[0]].k});
   await pg.waitForTimeout(120);
   ok('doctrine overlay',await pg.evaluate(()=>document.getElementById('relicov').style.display==='flex'));
   await pg.screenshot({path:__dirname+'/shots/65-doctrine.png'});
   await pg.click('#relics button:nth-child(1)');
-  ok('doctrine pick',await pg.evaluate(()=>S.rl.burn7===1&&!S.pick&&document.getElementById('relicov').style.display==='none'));
+  ok('doctrine pick',await pg.evaluate(k=>S.rl[k]===1&&!S.pick&&document.getElementById('relicov').style.display==='none',offeredDoctrine));
   await pg.keyboard.press('p');
   const pt0=await pg.evaluate(()=>S.t);
   await pg.waitForTimeout(180);

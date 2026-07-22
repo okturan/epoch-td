@@ -6,6 +6,7 @@ pub const EXECUTION_TICK_CAP: usize = 3_000_000;
 const W: i32 = 14;
 const H: i32 = 9;
 const LEVEL_MULTIPLIERS: [f64; 6] = [1., 1.5, 2.25, 3.375, 5.0625, 7.59375];
+const RELIC_MIN_AGE: [usize; 12] = [3, 0, 1, 0, 0, 0, 4, 0, 0, 1, 7, 8];
 
 fn level_multiplier(level: u8) -> f64 {
     LEVEL_MULTIPLIERS
@@ -1794,6 +1795,89 @@ impl Sim {
         let relic = self.pick[choice];
         self.choose_relic_id(relic);
     }
+    fn relic_relevant(&self, relic: usize) -> bool {
+        match relic {
+            1 | 7 => true,
+            2 => self
+                .params
+                .rules
+                .power_ages
+                .iter()
+                .any(|&unlock_age| unlock_age <= self.age()),
+            0 => self.towers.iter().any(|tower| {
+                self.params.towers[tower.i].burn
+                    || tower.fire
+                    || self
+                        .modifiers(tower)
+                        .and_then(|modifier| modifier.bu)
+                        .is_some_and(|value| value != 0.)
+            }),
+            3 | 4 => !self.towers.is_empty(),
+            5 => self.towers.iter().any(|tower| tower.level < 3),
+            6 => self.towers.iter().any(|tower| {
+                self.modifiers(tower)
+                    .and_then(|modifier| modifier.kb)
+                    .filter(|&value| value != 0.)
+                    .unwrap_or(self.params.towers[tower.i].knockback)
+                    > 0.
+            }),
+            8 => self.towers.iter().any(|tower| {
+                let spec = &self.params.towers[tower.i];
+                spec.rate > 0. && !spec.beam && !spec.aura && !spec.field
+            }),
+            9 => self.towers.iter().any(|tower| {
+                self.modifiers(tower)
+                    .and_then(|modifier| modifier.sp)
+                    .filter(|&value| value != 0.)
+                    .unwrap_or(self.params.towers[tower.i].splash)
+                    > 0.
+            }),
+            10 => self.towers.iter().any(|tower| {
+                self.params.towers[tower.i].aura
+                    || tower.rad
+                    || self
+                        .modifiers(tower)
+                        .and_then(|modifier| modifier.ir)
+                        .is_some_and(|value| value != 0.)
+            }),
+            11 => self
+                .towers
+                .iter()
+                .any(|tower| self.params.towers[tower.i].field),
+            _ => false,
+        }
+    }
+    fn doctrine_offers(&self) -> Vec<usize> {
+        let start = self.wave * 7 + self.map * 3;
+        let age = self.age();
+        let eligible: Vec<_> = (0..12)
+            .map(|step| (start + step) % 12)
+            .filter(|&relic| age >= RELIC_MIN_AGE[relic] && !self.relics[relic])
+            .collect();
+        let relevant: Vec<_> = eligible
+            .iter()
+            .copied()
+            .filter(|&relic| self.relic_relevant(relic))
+            .collect();
+        let planning: Vec<_> = eligible
+            .iter()
+            .copied()
+            .filter(|&relic| !self.relic_relevant(relic))
+            .collect();
+        let mut offers: Vec<_> = relevant.into_iter().take(2).collect();
+        if let Some(&relic) = planning.first() {
+            offers.push(relic);
+        }
+        for relic in eligible {
+            if offers.len() >= 3 {
+                break;
+            }
+            if !offers.contains(&relic) {
+                offers.push(relic);
+            }
+        }
+        offers
+    }
     fn power(&mut self, power: usize, x: i32, y: i32) -> bool {
         let age = self.wave.saturating_sub(usize::from(self.phase_wave)) / 5;
         if power >= 3
@@ -2408,15 +2492,7 @@ impl Sim {
             } else {
                 self.phase_wave = false;
                 if self.wave.is_multiple_of(10) {
-                    let mut sd = self.wave * 7 + self.map * 3;
-                    let available = self.relics.iter().filter(|&&x| !x).count();
-                    while self.pick.len() < 3 && self.pick.len() < available {
-                        let r = sd % 12;
-                        sd += 1;
-                        if !self.relics[r] && !self.pick.contains(&r) {
-                            self.pick.push(r);
-                        }
-                    }
+                    self.pick = self.doctrine_offers();
                 }
             }
         }
@@ -3680,6 +3756,40 @@ mod tests {
         let b = run_policy(&genome, 123, 1, 12, Params::default());
         assert_eq!(a.run.trace, b.run.trace);
         assert_eq!(a.actions.len(), b.actions.len());
+    }
+
+    #[test]
+    fn doctrine_offers_wait_for_unlocks_and_prefer_the_board() {
+        let mut sim = Sim::new(Params::default(), 0);
+        assert!(sim.place(0, 4, 2));
+        sim.wave = 10;
+        let offers = sim.doctrine_offers();
+        assert_eq!(offers, vec![1, 2, 9]);
+        assert!(sim.relic_relevant(offers[0]));
+        assert!(sim.relic_relevant(offers[1]));
+        assert!(!sim.relic_relevant(offers[2]));
+        assert!(
+            offers
+                .iter()
+                .all(|&relic| sim.age() >= RELIC_MIN_AGE[relic])
+        );
+        assert!(!offers.contains(&0));
+        assert!(!offers.contains(&6));
+        assert!(!offers.contains(&10));
+        assert!(!offers.contains(&11));
+
+        sim.gold = 10_000.;
+        assert!(sim.place(1, 5, 2));
+        assert!(sim.relic_relevant(9));
+        sim.wave = 20;
+        assert!(sim.place(4, 6, 2));
+        assert!(sim.relic_relevant(6));
+        sim.wave = 35;
+        assert!(sim.place(7, 7, 2));
+        assert!(sim.relic_relevant(10));
+        sim.wave = 40;
+        assert!(sim.place(8, 8, 2));
+        assert!(sim.relic_relevant(11));
     }
 
     #[test]

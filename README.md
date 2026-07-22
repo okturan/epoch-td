@@ -35,6 +35,8 @@ The game spans ten ages, and each one unlocks a single new tower that does somet
 
 Enemies scale to match. The ten archetypes (runners, armored, regenerators, splitters, shielded, tanks, dashers, and the rest) each counter a different tower, so a board that beat wave 20 will not beat wave 40 without new answers. The last stretch is tuned to need the Reactor, the Drone Hub, and a ramped Laser at the same time. You cannot stack one tower and coast.
 
+Every ten waves, doctrine choices adapt to the run. Tower-specific doctrines stay out of the pool until their enabling mechanic unlocks; two offers favor the current board and a third remains a deterministic planning option. Current gold never removes a choice, so saving toward a new tower remains valid strategy.
+
 ## More than placement
 
 You don't just drop a tower and leave it.
