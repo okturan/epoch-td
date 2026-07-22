@@ -102,6 +102,7 @@ img.si{width:12px;height:12px;vertical-align:-1px}
 <b>EPOCH — how to play</b><br>
 &middot; Build towers on free cells; enemies walk the path; a leak costs 1 life (bosses 5).<br>
 &middot; Every 5 waves a new Age begins and unlocks a new tower. Gold comes from kills.<br>
+&middot; Every 10 waves choose a doctrine: two choices favor your board, while one is a planning wildcard. Tower-specific doctrines wait until their mechanic unlocks.<br>
 &middot; Click a tower: <b>Upgrade</b> to L3 &middot; pick a permanent <b>&starf;Branch</b> at L3 &middot; <b>Merge</b> two identical adjacent towers (same level &amp; branch) into L4/L5 &middot; Sell for 70%.<br>
 &middot; <b>Combos:</b> neighbors of a Brazier fire <span style="color:#ff8c1a">flaming ammo</span> &middot; neighbors of a Reactor fire <span style="color:#7fe06f">radioactive ammo</span> &middot; a Drone Hub speeds up its neighbors.<br>
 &middot; <b>Reactions:</b> Meltdown &mdash; burn ticks &times;2 on irradiated enemies &middot; Shatter &mdash; splash hits +40% on slowed enemies.<br>
@@ -226,6 +227,51 @@ const RELICS=[
 {n:'Siege Corps',d:'Splash radius +20%',k:'sp12',i:'sp'},
 {n:'Fission Ammo',d:'Irradiation lingers 1.0s (was 0.5s)',k:'irr1',i:'aura'},
 {n:'Cold Snap',d:'Slow fields chill 50%, easing to 40% against stalled enemies',k:'slow5',i:'sf'}];
+const RELIC_MIN_AGE=[3,0,1,0,0,0,4,0,0,1,7,8];
+function relicTargetCount(S,i){
+  if(i===1||i===7)return 1;
+  if(i===2)return PWS.filter(p=>p.age<=age(S)).length;
+  let n=0;
+  for(const t of S.towers){
+    const T=TOWERS[t.i],M=t.sec!=null?SECRETS[t.sec].f:(T['b'+t.br]||{});
+    if(i===0&&(T.bu||M.bu||t.fire))n++;
+    else if((i===3||i===4))n++;
+    else if(i===5&&t.lvl<3)n++;
+    else if(i===6&&(M.kb||T.kb||0)>0)n++;
+    else if(i===8&&T.r>0&&!T.beam&&!T.aura&&!T.field)n++;
+    else if(i===9&&(M.sp||T.sp||0)>0)n++;
+    else if(i===10&&(T.aura||t.rad||M.ir))n++;
+    else if(i===11&&T.field)n++;
+  }
+  return n;
+}
+const relicRelevant=(S,i)=>relicTargetCount(S,i)>0;
+function doctrineOffers(S){
+  const eligible=[],start=S.wave*7+MAP*3,ag=age(S);
+  for(let step=0;step<RELICS.length;step++){
+    const r=(start+step)%RELICS.length;
+    if(ag>=RELIC_MIN_AGE[r]&&!S.rl[RELICS[r].k])eligible.push(r);
+  }
+  const relevant=eligible.filter(r=>relicRelevant(S,r));
+  const planning=eligible.filter(r=>!relicRelevant(S,r));
+  const offers=relevant.slice(0,2);
+  if(planning.length)offers.push(planning[0]);
+  for(const r of eligible)if(offers.length<3&&!offers.includes(r))offers.push(r);
+  return offers;
+}
+function relicContext(S,i){
+  const n=relicTargetCount(S,i),plural=n===1?'':'s';
+  if(age(S)<RELIC_MIN_AGE[i])return'Unlocks in the '+AGES[RELIC_MIN_AGE[i]][0]+' Age';
+  if(i===1)return'Active now — applies to every kill';
+  if(i===2)return n?'Active now — '+n+' powerup'+plural+' unlocked':'Planning option — unlock a powerup';
+  if(i===7)return'Immediate — grants 3 lives now';
+  if(n){
+    const nouns=['burn source','', '', 'tower','tower','upgradeable tower','knockback tower','', 'projectile tower','splash tower','irradiation source','slow field'];
+    return'Active now — affects '+n+' '+nouns[i]+plural;
+  }
+  const plans=['build a Brazier or another burn source','', '', 'applies to towers built later','applies when a tower is sold','applies to future upgrades','build a Cannon or another knockback source','', 'build a projectile tower','build a Catapult or another splash tower','build a Reactor or another irradiation source','build a Drone Hub'];
+  return'Planning option — '+plans[i];
+}
 const SECRETS=[
 {a:1,b:3,lv:2,base:1,n:'Meteor Thrower',d:'lobbed fire — bigger splash, double burn',f:{dm:2,sp:1.4,bu:1,bum:2}},
 {a:2,b:4,lv:2,base:4,n:'Siege Piercer',d:'armor-ignoring heavy shells',f:{dm:2,pi:1,kb:1.1}},
@@ -375,9 +421,7 @@ function update(S,dt){
     if(S.wave>=50&&!S.endless){S.over=1;S.won=1;S.phase='end';ev(S,'over')}
     else{S.phase='clear';S.autoT=3;if(S.wave%5===0&&S.wave<=45)ev(S,'age');else ev(S,'clear');
       if(S.wave%10===0&&(S.wave<50||S.endless)){
-        const off=[];let sd=S.wave*7+MAP*3;
-        const avail=RELICS.length-Object.keys(S.rl).length;
-        while(off.length<3&&off.length<avail){const r=sd++%RELICS.length;if(!S.rl[RELICS[r].k]&&!off.includes(r))off.push(r)}
+        const off=doctrineOffers(S);
         if(off.length)S.pick=off;
       }}
   }
@@ -782,7 +826,7 @@ function hud(){
     relicov.style.display='flex';
     $('relics').innerHTML='';
     S.pick.forEach((ri,slot)=>{const r=RELICS[ri],b=document.createElement('button');
-      b.innerHTML='<b>'+ic(r.i)+' '+r.n+'</b><small>'+r.d+'</small>';
+      b.innerHTML='<b>'+ic(r.i)+' '+r.n+'</b><small>'+r.d+'<br><span class=mut>'+relicContext(S,ri)+'</span></small>';
       b.onclick=()=>{pickRelic(S,slot);relicov.style.display='none';sfx('relic');floats.push({x:490,y:280,txt:r.n.toUpperCase(),col:'#ffd870',t:1.6,big:1})};
       $('relics').appendChild(b)});
   }
